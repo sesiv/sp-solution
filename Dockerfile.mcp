@@ -11,6 +11,7 @@ RUN apt-get update \
 
 # Install from GitHub by default (package isn't published to npm under @microsoft/*).
 RUN npm install -g github:microsoft/playwright-mcp
+RUN npx playwright install chrome
 
 COPY docker/mcp-entrypoint.sh /mcp-entrypoint.sh
 RUN chmod +x /mcp-entrypoint.sh

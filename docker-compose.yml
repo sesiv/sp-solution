@@ -7,7 +7,7 @@ services:
       - DISPLAY=${DISPLAY}
       - MCP_PACKAGE=${MCP_PACKAGE}
       - MCP_CMD=${MCP_CMD}
-      - MCP_ARGS=${MCP_ARGS:---host 0.0.0.0 --user-data-dir /data --allowed-hosts mcp:3333,localhost:3333,127.0.0.1:3333}
+      - MCP_ARGS=${MCP_ARGS:---host 0.0.0.0 --user-data-dir /data --allowed-hosts mcp:3333,localhost:3333,127.0.0.1:3333 --no-sandbox}
       - PORT=3333
       - HEADLESS=false
     ports:
@@ -31,20 +31,6 @@ services:
       - "8000:8000"
     depends_on:
       - mcp
-
-  cli:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    env_file:
-      - .env
-    command: ["sp-cli", "--server", "http://api:8000", "--session", "demo"]
-    depends_on:
-      - api
-    stdin_open: true
-    tty: true
-    profiles:
-      - cli
 
 volumes:
   mcp-data:

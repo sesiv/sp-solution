@@ -39,18 +39,13 @@ Build and run the API + MCP server:
 docker compose up --build
 ```
 
-Optional: run the CLI inside Docker in a separate terminal:
-
-```bash
-docker compose --profile cli up --build
-```
-
 Notes:
 - To see the headed browser on Linux, allow X11 and pass through `DISPLAY`:
   `xhost +local:docker` before `docker compose up`.
 - MCP downloads packages on first run via `npx`, so network access is required.
 - If MCP fails to start, set `MCP_PACKAGE` or `MCP_CMD` in `.env` to override the startup command.
 - For persistent sessions in Docker, set `MCP_ARGS` to include `--user-data-dir=/data` (default in `docker-compose.yml`).
+- Chrome in Docker runs as root; `--no-sandbox` is included in the default `MCP_ARGS`.
 
 ## Host CLI (recommended for flaky Docker TTY)
 Start the Docker services, then run the CLI on the host with the local TTY:

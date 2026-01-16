@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, List
 from urllib.parse import urlparse
@@ -67,13 +68,22 @@ class MCPHttpTransport(MCPTransportImpl):
     def __init__(self, endpoint: str) -> None:
         self.endpoint = endpoint
         self._client = httpx.AsyncClient(timeout=30.0)
+        self._sse_client: httpx.AsyncClient | None = None
+        self._sse_task: asyncio.Task | None = None
         self._session_id: str | None = None
         self._initialized = False
 
     async def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         await self._ensure_initialized()
         payload = _build_request("tools/call", {"name": name, "arguments": arguments})
-        response = await self._request(payload)
+        try:
+            response = await self._request(payload)
+        except MCPError as exc:
+            if "Session not found" not in str(exc):
+                raise
+            await self._reset_session()
+            await self._ensure_initialized()
+            response = await self._request(payload)
         return _extract_result(response)
 
     async def _ensure_initialized(self) -> None:
@@ -87,7 +97,18 @@ class MCPHttpTransport(MCPTransportImpl):
                 "clientInfo": {"name": "sp-solution", "version": "0.1.0"},
             },
         )
-        response = await self._request(payload, include_session=False)
+        try:
+            response = await self._request(payload, include_session=False)
+            _extract_result(response)
+            if self._session_id:
+                self._initialized = True
+                return
+        except MCPError as exc:
+            if "Session not found" not in str(exc):
+                raise
+
+        await self._ensure_session()
+        response = await self._request(payload)
         _extract_result(response)
         self._initialized = True
 
@@ -120,6 +141,48 @@ class MCPHttpTransport(MCPTransportImpl):
                 response_msg = messages[0]
             return response_msg
         raise MCPError(f"Unexpected MCP response content-type: {content_type}")
+
+    async def _ensure_session(self) -> None:
+        if self._session_id:
+            return
+        if self._sse_task and not self._sse_task.done():
+            return
+        headers = {
+            "accept": "text/event-stream",
+            "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+        }
+        self._sse_client = httpx.AsyncClient(timeout=None)
+        request = self._sse_client.build_request("GET", self.endpoint, headers=headers)
+        response = await self._sse_client.send(request, stream=True)
+        session_id = response.headers.get("mcp-session-id")
+        if not session_id:
+            await response.aclose()
+            raise MCPError("MCP HTTP session id missing from SSE response")
+        self._session_id = session_id
+        # Keep the SSE stream open to maintain the session.
+        self._sse_task = asyncio.create_task(self._drain_sse(response))
+
+    async def _reset_session(self) -> None:
+        self._session_id = None
+        self._initialized = False
+        if self._sse_task and not self._sse_task.done():
+            self._sse_task.cancel()
+        self._sse_task = None
+        if self._sse_client:
+            await self._sse_client.aclose()
+            self._sse_client = None
+
+    async def _drain_sse(self, response: httpx.Response) -> None:
+        try:
+            async for _line in response.aiter_lines():
+                pass
+        except Exception:
+            pass
+        finally:
+            await response.aclose()
+            if self._sse_client:
+                await self._sse_client.aclose()
+                self._sse_client = None
 
 
 class MCPBrowserClient:

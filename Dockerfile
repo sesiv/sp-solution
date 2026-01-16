@@ -8,7 +8,7 @@ WORKDIR /app
 COPY pyproject.toml README.md SAC.md /app/
 COPY src /app/src
 
-RUN pip install --no-cache-dir -e .
+RUN pip install .
 
 EXPOSE 8000
 
