@@ -1,0 +1,3 @@
+[console_scripts]
+sp-cli = sp_solution.cli.repl:app
+sp-server = sp_solution.transport.api:main

@@ -1,0 +1,1 @@
+python запускай ИСКЛЮЧИТЕЛЬНО через workon sp_solution

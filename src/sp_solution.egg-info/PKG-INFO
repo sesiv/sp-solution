@@ -1,0 +1,82 @@
+Metadata-Version: 2.4
+Name: sp-solution
+Version: 0.1.0
+Summary: MVP agent framework with FastAPI transport, MCP browser, and LangGraph loop
+Author: Codex
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.110
+Requires-Dist: uvicorn>=0.27
+Requires-Dist: pydantic>=2.6
+Requires-Dist: typer>=0.12
+Requires-Dist: rich>=13.7
+Requires-Dist: prompt_toolkit>=3.0
+Requires-Dist: httpx>=0.27
+Requires-Dist: websockets>=12.0
+Requires-Dist: langchain>=0.2.10
+Requires-Dist: langgraph>=0.2.0
+Requires-Dist: langchain-openai>=0.1.22
+
+# sp-solution MVP
+
+This repo implements the Solution Architecture Contract (SAC.md) as a minimal, extensible MVP.
+
+## What is implemented
+- FastAPI transport with WebSocket chat and SSE event stream.
+- Session manager with per-session event broker.
+- Browser layer via MCP client (pluggable transport).
+- Observation layer with size limits and dedupe.
+- Policy gate for confirmation of non-whitelisted actions.
+- Agent loop (LangGraph): OBSERVE -> DESCRIBE -> WAIT_USER (repeat).
+- CLI REPL (Typer + prompt_toolkit + Rich) for chat and live event stream.
+
+## Quick start
+1) Create a virtual environment and install dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+2) Start the server:
+
+```bash
+sp-server
+```
+
+3) Start the CLI:
+
+```bash
+sp-cli --server http://127.0.0.1:8000 --session demo
+```
+
+## CLI commands
+- `/observe` to trigger a new observation cycle.
+- `/click <eid>` to click an element.
+- `/type <eid> <text>` to type into a field.
+- `/scroll [direction] [amount]` to scroll (default: down 600).
+- `/wait [ms]` to wait.
+- `/screenshot` to request a screenshot.
+- `/yes` or `/no` to confirm policy-gated actions.
+
+## MCP configuration
+The browser layer expects a Playwright MCP server endpoint. Configure it using environment variables:
+
+- `MCP_ENDPOINT`: WebSocket endpoint for the MCP server (e.g. `ws://127.0.0.1:3333`).
+- `MCP_TOOL_LAUNCH`, `MCP_TOOL_OBSERVE`, `MCP_TOOL_CLICK`, `MCP_TOOL_TYPE`, `MCP_TOOL_SCROLL`,
+  `MCP_TOOL_WAIT`, `MCP_TOOL_SCREENSHOT`: tool names (defaults are in `sp_solution/config.py`).
+- `MCP_USER_DATA_DIR`: persistent profile directory for browser sessions.
+
+If `MCP_ENDPOINT` is not set, the browser layer will return a clear runtime error.
+
+## OpenRouter (optional)
+Set:
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL` (default: `openai/gpt-4o-mini`)
+
+The MVP currently uses heuristic descriptions and only calls the LLM if configured.
+
+## Notes
+- The observation layer limits token usage and never forwards full page snapshots.
+- The policy gate requires confirmation for non-whitelisted actions.

@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.swp
+.mypy_cache
+.pytest_cache
+dist
+build
+src/sp_solution.egg-info
