@@ -412,6 +412,7 @@ class AgentRunner:
 
     async def _observe(self, count_step: bool, run_state: RunState | None) -> Observation:
         raw = await self._call_tool("observe", {}, run_state=run_state if count_step else None, action=None)
+        self._logger.info("Observe raw response: %s", raw)
         observation = self._observer.build(raw)
         self._last_observation = observation
         await self._session.publish_event(
