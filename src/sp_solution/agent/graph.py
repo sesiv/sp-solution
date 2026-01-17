@@ -268,5 +268,25 @@ class AgentRunner:
     def _short_result(result: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(result, dict):
             return {"result": str(result)}
+        content = result.get("content")
+        if isinstance(content, list):
+            type_counts: Dict[str, int] = {}
+            text_chars = 0
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                item_type = str(item.get("type", "unknown"))
+                type_counts[item_type] = type_counts.get(item_type, 0) + 1
+                if item_type == "text":
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        text_chars += len(text)
+            summary: Dict[str, Any] = {
+                "content_items": len(content),
+                "content_types": type_counts,
+            }
+            if text_chars:
+                summary["text_chars"] = text_chars
+            return summary
         keys = list(result.keys())[:5]
         return {key: result[key] for key in keys}
