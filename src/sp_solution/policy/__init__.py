@@ -3,7 +3,7 @@ from __future__ import annotations
 from ..models import Action, PolicyDecision
 
 
-SAFE_ACTIONS = {"observe", "scroll", "wait", "screenshot"}
+SAFE_ACTIONS = {"observe", "describe", "scroll", "wait", "screenshot"}
 
 
 class PolicyGate:

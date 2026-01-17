@@ -59,6 +59,7 @@ Override the defaults with `SP_SERVER` and `SP_SESSION`.
 
 ## CLI commands
 - `/observe` to trigger a new observation cycle.
+- `/describe` to re-describe the last observation without a new snapshot.
 - `/click <eid>` to click an element.
 - `/type <eid> <text>` to type into a field.
 - `/scroll [direction] [amount]` to scroll (default: down 600).

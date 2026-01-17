@@ -161,6 +161,9 @@ class AgentRunner:
         return result
 
     async def _handle_action(self, action: Action) -> None:
+        if action.kind == "describe":
+            await self._describe_last()
+            return
         decision = self._policy.assess(action)
         if not decision.allow and not decision.requires_confirmation:
             await self._session.send_message(
@@ -193,6 +196,22 @@ class AgentRunner:
             return
         await self._execute_action(action)
         await self._run_cycle(None)
+
+    async def _describe_last(self) -> None:
+        if not self._last_observation:
+            await self._session.send_message(
+                ServerMessage(
+                    type="agent_message",
+                    payload={"text": "No observation yet. Use /observe first."},
+                )
+            )
+            await self._set_status("waiting_user")
+            return
+        description = await self._describer.describe(self._last_observation)
+        await self._session.send_message(
+            ServerMessage(type="agent_message", payload={"text": description})
+        )
+        await self._set_status("waiting_user")
 
     async def _execute_action(self, action: Action) -> None:
         if action.kind == "click":
@@ -227,6 +246,8 @@ class AgentRunner:
         command = tokens[0].lstrip("/").lower()
         if command == "observe":
             return Action(kind="observe")
+        if command == "describe":
+            return Action(kind="describe")
         if command == "click" and len(tokens) >= 2:
             return Action(kind="click", eid=tokens[1])
         if command == "type" and len(tokens) >= 3:

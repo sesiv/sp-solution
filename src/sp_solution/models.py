@@ -32,7 +32,7 @@ class Observation(BaseModel):
 
 class Action(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
-    kind: Literal["observe", "click", "type", "scroll", "wait", "screenshot"]
+    kind: Literal["observe", "describe", "click", "type", "scroll", "wait", "screenshot"]
     eid: str | None = None
     value: str | None = None
     args: Dict[str, Any] = Field(default_factory=dict)
