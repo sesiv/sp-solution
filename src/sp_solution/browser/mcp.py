@@ -288,8 +288,21 @@ class MCPBrowserClient:
 
     async def scroll(self, direction: str = "down", amount: int = 600) -> Dict[str, Any]:
         await self.ensure_started()
-        key = "PageDown" if direction.lower() != "up" else "PageUp"
-        return await self._transport.call(self._tools.scroll, {"key": key})
+        tool = self._tools.scroll
+        normalized = tool.lower()
+        direction_norm = direction.lower()
+        if "press_key" in normalized or "presskey" in normalized:
+            key = "PageDown" if direction_norm != "up" else "PageUp"
+            payload: Dict[str, Any] = {"key": key}
+        elif "scroll" in normalized:
+            payload = {"direction": direction_norm, "amount": amount}
+        elif "wheel" in normalized:
+            delta = amount if direction_norm != "up" else -amount
+            payload = {"deltaY": delta}
+        else:
+            key = "PageDown" if direction_norm != "up" else "PageUp"
+            payload = {"key": key}
+        return await self._transport.call(tool, payload)
 
     async def wait(self, timeout_ms: int = 1000) -> Dict[str, Any]:
         await self.ensure_started()
