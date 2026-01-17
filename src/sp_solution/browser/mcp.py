@@ -151,8 +151,10 @@ class MCPHttpTransport(MCPTransportImpl):
         request = self._sse_client.build_request("GET", self.endpoint, headers=headers)
         response = await self._sse_client.send(request, stream=True)
         if response.status_code >= 400:
+            raw = await response.aread()
             await response.aclose()
-            raise MCPError(f"MCP SSE error {response.status_code}: {response.text}")
+            message = raw.decode("utf-8", errors="replace") if raw else ""
+            raise MCPError(f"MCP SSE error {response.status_code}: {message}")
         self._sse_task = asyncio.create_task(self._listen_sse(response))
 
     async def _reset_session(self) -> None:
