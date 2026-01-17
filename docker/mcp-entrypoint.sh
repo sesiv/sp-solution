@@ -5,6 +5,16 @@ PORT="${PORT:-3333}"
 HEADLESS="${HEADLESS:-false}"
 MCP_ARGS="${MCP_ARGS:-}"
 
+if [[ -d "/data" ]]; then
+  if command -v pgrep >/dev/null 2>&1; then
+    if ! pgrep -f '/opt/google/chrome' >/dev/null 2>&1; then
+      rm -f /data/SingletonLock /data/SingletonSocket /data/SingletonCookie
+    fi
+  else
+    rm -f /data/SingletonLock /data/SingletonSocket /data/SingletonCookie
+  fi
+fi
+
 args=(--port "${PORT}")
 case "${HEADLESS}" in
   true|TRUE|1|yes|YES)
