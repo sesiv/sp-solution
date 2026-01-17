@@ -21,7 +21,7 @@ class LLMDescriber:
 
     async def describe(self, observation: Observation) -> str:
         if not self._client:
-            return self._fallback_description(observation)
+            raise RuntimeError("OpenRouter client is not configured. Set OPENROUTER_API_KEY.")
         prompt = (
             "You are an assistant summarizing a browser observation for an agent. "
             "Be concise, mention page title/url, key interactive elements, and any overlays."
@@ -29,18 +29,6 @@ class LLMDescriber:
         message = HumanMessage(content=f"{prompt}\n\nObservation: {observation.model_dump()}")
         try:
             response = await self._client.ainvoke([message])
-        except Exception:
-            return self._fallback_description(observation)
+        except Exception as exc:
+            raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
         return response.content.strip()
-
-    @staticmethod
-    def _fallback_description(observation: Observation) -> str:
-        page = observation.page
-        top_elements = [elem.name or elem.role or elem.eid for elem in observation.interactive[:8]]
-        overlays = ", ".join(observation.overlays[:3]) if observation.overlays else "none"
-        return (
-            f"Page '{page.title}' at {page.url}. "
-            f"Interactive elements: {len(observation.interactive)}. "
-            f"Examples: {', '.join(top_elements) if top_elements else 'none'}. "
-            f"Overlays: {overlays}."
-        )
