@@ -87,3 +87,4 @@ class RunState:
     failures: list[str] = field(default_factory=list)
     needs_observe: bool = True
     last_user_message: Optional[str] = None
+    invalid_actions: int = 0

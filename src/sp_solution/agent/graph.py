@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 from ..browser.mcp import MCPBrowserClient
 from ..config import Settings
-from ..models import Action, Event, Observation, ServerMessage
+from ..models import Action, Event, Observation, ServerMessage, InteractiveElement
 from ..observation import ObservationBuilder
 from ..policy import PolicyGate
 from ..session import RunState, Session
@@ -14,6 +14,7 @@ from .llm import ActionContext, LLMActionPlanner, LLMDescriber
 
 
 MAX_TOOL_STEPS = 10
+EDITABLE_ROLES = {"textbox", "searchbox", "combobox", "textarea", "input"}
 CONTINUE_HINTS = {
     "continue",
     "go on",
@@ -256,6 +257,26 @@ class AgentRunner:
                 )
                 await self._set_status("waiting_user")
                 return
+            validation_error = self._validate_action(action)
+            if validation_error:
+                run_state.invalid_actions += 1
+                self._record_validation_failure(run_state, action, validation_error)
+                if run_state.invalid_actions >= 3:
+                    await self._session.send_message(
+                        ServerMessage(
+                            type="agent_message",
+                            payload={
+                                "text": (
+                                    f"Blocked action: {validation_error}. "
+                                    "Please clarify the goal or specify the element."
+                                )
+                            },
+                        )
+                    )
+                    await self._set_status("waiting_user")
+                    self._session.run_state = None
+                    return
+                continue
 
             decision = self._policy.assess(action, self._last_observation)
             if not decision.allow and not decision.requires_confirmation:
@@ -492,6 +513,12 @@ class AgentRunner:
         run_state.failures.append(f"{label} -> {error}")
         self._logger.info("Step failed: %s", {"action": label, "error": error})
 
+    def _record_validation_failure(self, run_state: RunState, action: Action, error: str) -> None:
+        label = self._format_action_label(action)
+        run_state.failures.append(f"{label} -> {error}")
+        run_state.steps.append(f"{label} -> skipped ({error})")
+        self._logger.info("Validation blocked action: %s", {"action": label, "error": error})
+
     def _format_action_label(self, action: Action | None) -> str:
         if action is None:
             return "observe"
@@ -509,6 +536,20 @@ class AgentRunner:
         if action.kind == "screenshot":
             return "screenshot"
         return action.kind
+
+    def _validate_action(self, action: Action) -> str | None:
+        if action.kind not in {"type", "click"}:
+            return None
+        element = self._get_element(action.eid)
+        if not element:
+            return "Target element not found in observation."
+        if element.disabled:
+            return "Target element is disabled."
+        if action.kind == "type":
+            role = (element.role or "").lower()
+            if role and role not in EDITABLE_ROLES:
+                return f"Target element role '{role}' is not editable."
+        return None
 
     async def _finalize(self, message: str) -> None:
         await self._session.publish_event(
@@ -553,6 +594,14 @@ class AgentRunner:
             if element.eid == eid:
                 parts = [element.role, element.name, element.value]
                 return " ".join([part for part in parts if part])
+        return None
+
+    def _get_element(self, eid: str | None) -> InteractiveElement | None:
+        if not eid or not self._last_observation:
+            return None
+        for element in self._last_observation.interactive:
+            if element.eid == eid:
+                return element
         return None
 
     def _get_browser(self) -> MCPBrowserClient:

@@ -92,7 +92,7 @@ class ObservationBuilder:
 
     def _parse_snapshot_interactive(self, lines: List[str]) -> List[InteractiveElement]:
         ref_re = re.compile(r"ref=([A-Za-z0-9_-]+)")
-        role_re = re.compile(r"-\\s*([A-Za-z0-9_]+)")
+        role_re = re.compile(r"-\s*([A-Za-z0-9_]+)")
         name_re = re.compile(r"\"([^\"]+)\"")
         result: List[InteractiveElement] = []
         seen: set[str] = set()
@@ -102,6 +102,8 @@ class ObservationBuilder:
             ref_match = ref_re.search(line)
             if not ref_match:
                 continue
+            lowered = line.lower()
+            disabled = "disabled" in lowered or "aria-disabled=true" in lowered
             eid = ref_match.group(1)
             if eid in seen:
                 continue
@@ -114,6 +116,7 @@ class ObservationBuilder:
                     role=role_match.group(1) if role_match else None,
                     name=name_match.group(1) if name_match else None,
                     visible=True,
+                    disabled=disabled,
                 )
             )
             if len(result) >= self.max_interactive:
