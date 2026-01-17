@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -14,6 +15,7 @@ from ..models import ClientMessage, Event, ServerMessage
 from ..session import SessionManager
 
 
+logging.basicConfig(level=logging.INFO)
 settings = load_settings()
 app = FastAPI()
 manager = SessionManager()

@@ -58,6 +58,9 @@ This runs `docker compose up -d` and then executes `sp-cli` via `workon sp_solut
 Override the defaults with `SP_SERVER` and `SP_SESSION`.
 
 ## CLI commands
+- `/chat` to enter chat mode (natural language agent loop).
+- `/exit` to leave chat mode and return to command mode.
+- `/quit` to exit the REPL.
 - `/observe` to trigger a new observation cycle.
 - `/describe` to re-describe the last observation without a new snapshot.
 - `/click <eid>` to click an element.

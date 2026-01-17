@@ -97,15 +97,26 @@ async def _ws_handler(url: str, outgoing: asyncio.Queue[dict], pending_ref: dict
             await asyncio.sleep(1.5)
 
 
-async def _prompt_loop(outgoing: asyncio.Queue[dict], pending_ref: dict) -> None:
+async def _prompt_loop(
+    outgoing: asyncio.Queue[dict], pending_ref: dict, chat_state: dict
+) -> None:
     session = PromptSession()
     while True:
-        text = await session.prompt_async("sp> ")
+        prompt = "sp(chat)> " if chat_state.get("enabled") else "sp> "
+        text = await session.prompt_async(prompt)
         text = text.strip()
         if not text:
             continue
-        if text in {"/quit", "/exit"}:
+        if text == "/quit":
             break
+        if text == "/chat":
+            chat_state["enabled"] = True
+            outgoing.put_nowait({"type": "user_message", "payload": {"text": text}})
+            continue
+        if text == "/exit":
+            chat_state["enabled"] = False
+            outgoing.put_nowait({"type": "user_message", "payload": {"text": text}})
+            continue
         if text in {"/yes", "/no"}:
             reference = pending_ref.get("value")
             if not reference:
@@ -117,6 +128,14 @@ async def _prompt_loop(outgoing: asyncio.Queue[dict], pending_ref: dict) -> None
                     "payload": {"confirmed": text == "/yes", "reference": reference},
                 }
             )
+            continue
+        if chat_state.get("enabled"):
+            if text.startswith("/"):
+                chat_state["enabled"] = False
+            outgoing.put_nowait({"type": "user_message", "payload": {"text": text}})
+            continue
+        if not text.startswith("/"):
+            console.print("Use /chat to enter chat mode.")
             continue
         outgoing.put_nowait({"type": "user_message", "payload": {"text": text}})
 
@@ -131,12 +150,13 @@ def repl(
     sse_url = _sse_url(server, session)
     pending_ref: dict[str, Optional[str]] = {"value": None}
     outgoing: asyncio.Queue[dict] = asyncio.Queue()
+    chat_state: dict[str, bool] = {"enabled": False}
 
     async def runner() -> None:
         await asyncio.gather(
             _sse_listener(sse_url, pending_ref),
             _ws_handler(ws_url, outgoing, pending_ref),
-            _prompt_loop(outgoing, pending_ref),
+            _prompt_loop(outgoing, pending_ref, chat_state),
         )
 
     try:

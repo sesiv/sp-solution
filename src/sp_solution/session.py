@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 
 from .models import Action, Event, ServerMessage
 
@@ -43,6 +43,10 @@ class Session:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pending_action_id: Optional[str] = None
     pending_action: Optional[Action] = None
+    pending_kind: Literal["none", "confirm", "manual"] = "none"
+    mode: Literal["cmd", "chat"] = "cmd"
+    current_goal: Optional[str] = None
+    run_state: Optional[RunState] = None
     status: str = "idle"
     runner: Optional[Any] = None
 
@@ -74,3 +78,12 @@ class SessionManager:
 
     def get(self, session_id: str) -> Optional[Session]:
         return self._sessions.get(session_id)
+
+
+@dataclass
+class RunState:
+    tool_steps: int = 0
+    steps: list[str] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+    needs_observe: bool = True
+    last_user_message: Optional[str] = None
