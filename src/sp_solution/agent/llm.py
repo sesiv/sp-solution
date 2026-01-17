@@ -40,7 +40,6 @@ class LLMDescriber:
 
 @dataclass
 class ActionContext:
-    current_goal: str | None
     user_message: str | None
     observation: Observation | None
     steps_taken: int
@@ -86,7 +85,6 @@ class LLMActionPlanner:
         observation = context.observation.model_dump() if context.observation else None
         return json.dumps(
             {
-                "current_goal": context.current_goal,
                 "user_message": context.user_message,
                 "steps_taken": context.steps_taken,
                 "max_steps": context.max_steps,

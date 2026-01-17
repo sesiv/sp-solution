@@ -45,7 +45,6 @@ class Session:
     pending_action: Optional[Action] = None
     pending_kind: Literal["none", "confirm", "manual"] = "none"
     mode: Literal["cmd", "chat"] = "cmd"
-    current_goal: Optional[str] = None
     run_state: Optional[RunState] = None
     status: str = "idle"
     runner: Optional[Any] = None

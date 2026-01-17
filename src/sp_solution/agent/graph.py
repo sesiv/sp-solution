@@ -15,34 +15,6 @@ from .llm import ActionContext, LLMActionPlanner, LLMDescriber
 
 MAX_TOOL_STEPS = 10
 EDITABLE_ROLES = {"textbox", "searchbox", "combobox", "textarea", "input"}
-CONTINUE_HINTS = {
-    "continue",
-    "go on",
-    "next",
-    "more",
-    "yes",
-    "\u0434\u0430\u0432\u0430\u0439",
-    "\u0434\u0430",
-    "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0430\u0439",
-    "\u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c",
-    "\u0434\u0430\u043b\u044c\u0448\u0435",
-    "\u0435\u0449\u0435",
-    "\u0435\u0449\u0451",
-    "okay",
-    "ok",
-    "\u043e\u043a\u0435\u0439",
-    "\u0430\u0433\u0430",
-}
-STOP_HINTS = {
-    "stop",
-    "cancel",
-    "no",
-    "\u043d\u0435\u0442",
-    "\u0445\u0432\u0430\u0442\u0438\u0442",
-    "\u0441\u0442\u043e\u043f",
-    "\u043d\u0435 \u043d\u0430\u0434\u043e",
-    "\u043e\u0442\u043c\u0435\u043d\u0430",
-}
 
 
 class AgentRunner:
@@ -182,30 +154,7 @@ class AgentRunner:
         await self._set_status("waiting_user")
 
     async def _handle_chat_message(self, text: str) -> None:
-        lowered = text.strip().lower()
-        if not self._session.current_goal and lowered in CONTINUE_HINTS:
-            await self._session.send_message(
-                ServerMessage(type="agent_message", payload={"text": "No active goal yet. Tell me what to do."})
-            )
-            await self._set_status("waiting_user")
-            return
-        if lowered in STOP_HINTS:
-            await self._session.send_message(
-                ServerMessage(type="agent_message", payload={"text": "Okay, stopping here."})
-            )
-            await self._set_status("waiting_user")
-            return
-        if self._should_update_goal(text):
-            self._session.current_goal = text
         await self._run_chat_loop(user_message=text, run_state=None)
-
-    def _should_update_goal(self, text: str) -> bool:
-        if not self._session.current_goal:
-            return True
-        lowered = text.strip().lower()
-        if lowered in CONTINUE_HINTS or lowered in STOP_HINTS:
-            return False
-        return True
 
     async def _run_chat_loop(self, user_message: Optional[str], run_state: RunState | None) -> None:
         if not self._planner.available():
@@ -232,7 +181,6 @@ class AgentRunner:
                     break
 
             context = ActionContext(
-                current_goal=self._session.current_goal,
                 user_message=run_state.last_user_message,
                 observation=self._last_observation,
                 steps_taken=run_state.tool_steps,
@@ -330,7 +278,7 @@ class AgentRunner:
         await self._session.send_message(
             ServerMessage(
                 type="agent_question",
-                payload={"text": "Continue with the same goal?", "reference": None},
+                payload={"text": "Continue?", "reference": None},
             )
         )
         await self._set_status("waiting_user")
@@ -622,10 +570,7 @@ class AgentRunner:
             failure_line = f"Failures: {failures}."
         else:
             failure_line = "Failures: none."
-        goal = self._session.current_goal or "the current goal"
-        if len(goal) > 80:
-            goal = f"{goal[:77]}..."
-        next_step = f"Next step: continue toward '{goal}'."
+        next_step = "Next step: continue with the current task."
         return f"Steps: {done}. {failure_line} {next_step}"
 
     @staticmethod
