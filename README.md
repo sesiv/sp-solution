@@ -74,8 +74,8 @@ Override the defaults with `SP_SERVER` and `SP_SESSION`.
 The browser layer expects a Playwright MCP server endpoint. Configure it using environment variables:
 
 - `MCP_ENDPOINT`: HTTP endpoint for the MCP server (e.g. `http://127.0.0.1:3333/mcp`).
-- `MCP_TOOL_LAUNCH`, `MCP_TOOL_OBSERVE`, `MCP_TOOL_CLICK`, `MCP_TOOL_TYPE`, `MCP_TOOL_SCROLL`,
-  `MCP_TOOL_WAIT`, `MCP_TOOL_SCREENSHOT`: tool names (defaults are in `sp_solution/config.py`).
+- Tool names are bound to Playwright MCP defaults (`browser_snapshot`, `browser_click`, `browser_type`,
+  `browser_press_key`, `browser_wait_for`, `browser_take_screenshot`, `browser_install`).
 - `MCP_USER_DATA_DIR`: persistent profile directory for browser sessions.
 
 If `MCP_ENDPOINT` is not set, the browser layer will return a clear runtime error.

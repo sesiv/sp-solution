@@ -256,13 +256,13 @@ class MCPBrowserClient:
         self._session_id = session_id
         self._settings = settings
         self._tools = MCPToolNames(
-            launch=settings.mcp_tool_launch,
-            observe=settings.mcp_tool_observe,
-            click=settings.mcp_tool_click,
-            type=settings.mcp_tool_type,
-            scroll=settings.mcp_tool_scroll,
-            wait=settings.mcp_tool_wait,
-            screenshot=settings.mcp_tool_screenshot,
+            launch="browser_install",
+            observe="browser_snapshot",
+            click="browser_click",
+            type="browser_type",
+            scroll="browser_press_key",
+            wait="browser_wait_for",
+            screenshot="browser_take_screenshot",
         )
         self._transport = MCPTransport(settings.mcp_endpoint)
         self._started = False
