@@ -48,14 +48,30 @@ class ObservationBuilder:
         if not text:
             return None
         lines = text.splitlines()
-        page = PageInfo(
-            url=self._find_prefixed(lines, "- Page URL:"),
-            title=self._find_prefixed(lines, "- Page Title:"),
-        )
-        snapshot_lines = self._extract_snapshot_block(lines)
-        interactive = self._parse_snapshot_interactive(snapshot_lines)
-        text_blocks = self._parse_snapshot_text_blocks(snapshot_lines)
-        return page, interactive, text_blocks
+        sections = self._split_sections(lines)
+        candidates: List[tuple[PageInfo, List[InteractiveElement], List[str]]] = []
+        for section in sections:
+            page = PageInfo(
+                url=self._find_prefixed(section, "- Page URL:"),
+                title=self._find_prefixed(section, "- Page Title:"),
+            )
+            snapshot_lines = self._extract_snapshot_block(section)
+            if not snapshot_lines:
+                continue
+            interactive = self._parse_snapshot_interactive(snapshot_lines)
+            text_blocks = self._parse_snapshot_text_blocks(snapshot_lines)
+            candidates.append((page, interactive, text_blocks))
+        if not candidates:
+            page = PageInfo(
+                url=self._find_prefixed(lines, "- Page URL:"),
+                title=self._find_prefixed(lines, "- Page Title:"),
+            )
+            snapshot_lines = self._extract_snapshot_block(lines)
+            interactive = self._parse_snapshot_interactive(snapshot_lines)
+            text_blocks = self._parse_snapshot_text_blocks(snapshot_lines)
+            return page, interactive, text_blocks
+        best = max(candidates, key=lambda item: (len(item[1]), len(item[2])))
+        return best
 
     def _content_to_text(self, content: List[Any]) -> str:
         parts: List[str] = []
@@ -89,6 +105,19 @@ class ObservationBuilder:
             if line.strip().startswith("- Page Snapshot:"):
                 return lines[index + 1 :]
         return []
+
+    def _split_sections(self, lines: List[str]) -> List[List[str]]:
+        indices: List[int] = []
+        for index, line in enumerate(lines):
+            if line.strip().startswith("- Page URL:"):
+                indices.append(index)
+        if not indices:
+            return [lines]
+        sections: List[List[str]] = []
+        for i, start in enumerate(indices):
+            end = indices[i + 1] if i + 1 < len(indices) else len(lines)
+            sections.append(lines[start:end])
+        return sections
 
     def _parse_snapshot_interactive(self, lines: List[str]) -> List[InteractiveElement]:
         ref_re = re.compile(r"ref=([A-Za-z0-9_-]+)")
