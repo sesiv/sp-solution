@@ -35,6 +35,7 @@ class Action(BaseModel):
     kind: Literal[
         "observe",
         "describe",
+        "launch",
         "click",
         "type",
         "scroll",

@@ -377,6 +377,9 @@ class AgentRunner:
                 take_screenshot=run_state is not None,
             )
             return
+        if action.kind == "launch":
+            await self._call_tool("launch", {}, run_state=run_state, action=action)
+            return
         if action.kind == "click":
             await self._call_tool(
                 "click",
@@ -452,6 +455,8 @@ class AgentRunner:
             browser = self._get_browser()
             if name == "observe":
                 result = await browser.observe(**args)
+            elif name == "launch":
+                result = await browser.launch()
             elif name == "click":
                 result = await browser.click(args["eid"], args.get("element"))
             elif name == "type":
@@ -519,6 +524,8 @@ class AgentRunner:
             return f"wait {timeout_ms}ms"
         if action.kind == "screenshot":
             return "screenshot"
+        if action.kind == "launch":
+            return "launch"
         return action.kind
 
     def _validate_action(self, action: Action) -> str | None:
@@ -556,6 +563,8 @@ class AgentRunner:
             return Action(kind="observe")
         if command == "describe":
             return Action(kind="describe")
+        if command == "launch":
+            return Action(kind="launch")
         if command == "click" and len(tokens) >= 2:
             return Action(kind="click", eid=tokens[1])
         if command == "type" and len(tokens) >= 3:

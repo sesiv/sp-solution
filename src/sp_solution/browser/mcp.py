@@ -272,6 +272,10 @@ class MCPBrowserClient:
             return
         self._started = True
 
+    async def launch(self) -> Dict[str, Any]:
+        await self.ensure_started()
+        return await self._transport.call(self._tools.launch, {})
+
     async def observe(self, mode: str = "main", target: str | None = None) -> Dict[str, Any]:
         await self.ensure_started()
         return await self._transport.call(self._tools.observe, {})

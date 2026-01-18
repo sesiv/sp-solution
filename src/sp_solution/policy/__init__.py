@@ -5,7 +5,7 @@ import re
 from ..models import Action, Observation, PolicyDecision
 
 
-SAFE_ACTIONS = {"observe", "describe", "scroll", "wait", "screenshot", "stop", "need_user"}
+SAFE_ACTIONS = {"observe", "describe", "launch", "scroll", "wait", "screenshot", "stop", "need_user"}
 CLICK_ROLES = {"button", "link", "menuitem", "tab", "option", "checkbox", "radio", "switch", "submit"}
 DESTRUCTIVE_KEYWORDS = [
     # English

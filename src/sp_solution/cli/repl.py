@@ -144,6 +144,9 @@ async def _prompt_loop(
 def repl(
     server: str = typer.Option("http://127.0.0.1:8000", help="Server base URL"),
     session: str = typer.Option("demo", help="Session id"),
+    auto_launch: bool = typer.Option(
+        False, help="Send /launch on startup", envvar="SP_AUTO_LAUNCH"
+    ),
 ) -> None:
     """Run the CLI REPL."""
     ws_url = _ws_url(server, session)
@@ -151,6 +154,8 @@ def repl(
     pending_ref: dict[str, Optional[str]] = {"value": None}
     outgoing: asyncio.Queue[dict] = asyncio.Queue()
     chat_state: dict[str, bool] = {"enabled": False}
+    if auto_launch:
+        outgoing.put_nowait({"type": "user_message", "payload": {"text": "/launch"}})
 
     async def runner() -> None:
         await asyncio.gather(
