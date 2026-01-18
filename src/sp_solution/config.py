@@ -23,7 +23,7 @@ class Settings:
     openrouter_model: str
 
 
-DEFAULT_TOOL_LAUNCH = "browser_install"
+DEFAULT_TOOL_LAUNCH = "browser_launch"
 DEFAULT_TOOL_OBSERVE = "browser_snapshot"
 DEFAULT_TOOL_CLICK = "browser_click"
 DEFAULT_TOOL_TYPE = "browser_type"
