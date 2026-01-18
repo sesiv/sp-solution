@@ -258,6 +258,7 @@ class ObservationBuilder:
     ) -> List[InteractiveElement]:
         ref_re = re.compile(r"\bref\s*[:=]\s*([A-Za-z0-9_-]+|\"[^\"]+\"|'[^']+')")
         role_re = re.compile(r"\brole\s*:\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
+        role_token_re = re.compile(r"^\s*-\s*([A-Za-z0-9_-]+)")
         name_re = re.compile(r"\bname\s*:\s*(\"[^\"]+\"|'[^']+'|[^,#]+)", re.IGNORECASE)
         aria_re = re.compile(r"\baria-label\s*:\s*(\"[^\"]+\"|'[^']+'|[^,#]+)", re.IGNORECASE)
         quoted_re = re.compile(r"\"([^\"]+)\"|'([^']+)'")
@@ -283,7 +284,11 @@ class ObservationBuilder:
             hidden = self._bool_from_text(line, "hidden")
             if visible is None and hidden is not None:
                 visible = not hidden
-            role = role_match.group(1) if role_match else None
+            if role_match:
+                role = role_match.group(1)
+            else:
+                role_token = role_token_re.search(line)
+                role = role_token.group(1) if role_token else None
             name = None
             if name_match:
                 name = name_match.group(1) or name_match.group(2)
@@ -345,10 +350,14 @@ class ObservationBuilder:
         while stack:
             current = stack.pop()
             if isinstance(current, dict):
-                yield current
-                for value in current.values():
+                for key, value in current.items():
+                    if isinstance(key, str):
+                        parsed = self._parse_snapshot_key(key)
+                        if parsed:
+                            yield parsed
                     if isinstance(value, (dict, list)):
                         stack.append(value)
+                yield current
             elif isinstance(current, list):
                 stack.extend(current)
 
@@ -360,6 +369,24 @@ class ObservationBuilder:
                 if text:
                     return text
         return None
+
+    def _parse_snapshot_key(self, key: str) -> Dict[str, Any] | None:
+        text = key.strip()
+        if not text:
+            return None
+        role_match = re.match(r"^([A-Za-z0-9_-]+)", text)
+        ref_match = re.search(r"\[ref=([A-Za-z0-9_-]+)\]", text)
+        name_match = re.search(r"\"([^\"]+)\"|'([^']+)'", text)
+        if not role_match and not ref_match and not name_match:
+            return None
+        node: Dict[str, Any] = {}
+        if role_match:
+            node["role"] = role_match.group(1)
+        if ref_match:
+            node["ref"] = ref_match.group(1)
+        if name_match:
+            node["name"] = name_match.group(1) or name_match.group(2)
+        return node
 
     def _extract_accessible_name(
         self, node: Dict[str, Any], attrs: Dict[str, Any] | None
