@@ -46,5 +46,5 @@ def load_settings() -> Settings:
         mcp_tool_wait=os.getenv("MCP_TOOL_WAIT", DEFAULT_TOOL_WAIT),
         mcp_tool_screenshot=os.getenv("MCP_TOOL_SCREENSHOT", DEFAULT_TOOL_SCREENSHOT),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
-        openrouter_model=os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+        openrouter_model=os.getenv("OPENROUTER_MODEL"),
     )
