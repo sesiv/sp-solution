@@ -13,14 +13,18 @@ class Settings:
     mcp_user_data_dir: str | None
     openrouter_api_key: str | None
     openrouter_model: str | None
+    openrouter_provider: str | None
 
 
 def load_settings() -> Settings:
     load_dotenv()
+    provider = os.getenv("OPENROUTER_PROVIDER")
+    provider = provider.strip() if provider else None
 
     return Settings(
         mcp_endpoint=os.getenv("MCP_ENDPOINT"),
         mcp_user_data_dir=os.getenv("MCP_USER_DATA_DIR"),
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
         openrouter_model=os.getenv("OPENROUTER_MODEL"),
+        openrouter_provider=provider,
     )

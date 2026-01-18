@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -13,14 +13,26 @@ from ..config import Settings
 from ..models import Action, Observation
 
 
+def _openrouter_extra_body(settings: Settings) -> Dict[str, Any] | None:
+    provider = settings.openrouter_provider
+    if not provider:
+        return None
+    providers = [item.strip() for item in provider.split(",") if item.strip()]
+    if not providers:
+        return None
+    return {"provider": {"order": providers}}
+
+
 class LLMDescriber:
     def __init__(self, settings: Settings) -> None:
         self._client: Optional[ChatOpenAI] = None
         if settings.openrouter_api_key:
+            extra_body = _openrouter_extra_body(settings)
             self._client = ChatOpenAI(
                 model=settings.openrouter_model,
                 api_key=settings.openrouter_api_key,
                 base_url="https://openrouter.ai/api/v1",
+                extra_body=extra_body,
             )
 
     async def describe(self, observation: Observation) -> str:
@@ -51,11 +63,13 @@ class LLMActionPlanner:
     def __init__(self, settings: Settings) -> None:
         self._client: Optional[ChatOpenAI] = None
         if settings.openrouter_api_key:
+            extra_body = _openrouter_extra_body(settings)
             self._client = ChatOpenAI(
                 model=settings.openrouter_model,
                 api_key=settings.openrouter_api_key,
                 base_url="https://openrouter.ai/api/v1",
                 temperature=0.2,
+                extra_body=extra_body,
             )
         self._logger = logging.getLogger(__name__)
 
