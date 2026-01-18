@@ -131,6 +131,9 @@ class ObservationBuilder:
         for index, line in enumerate(lines):
             if line.strip().startswith("- Page Snapshot:"):
                 return lines[index + 1 :]
+        if lines:
+            logger.warning("Snapshot block not found in MCP content; falling back to full text.")
+            return lines
         logger.warning("Snapshot block not found in MCP content.")
         return []
 
@@ -245,24 +248,26 @@ class ObservationBuilder:
     def _parse_snapshot_interactive_heuristic(
         self, lines: List[str], limit: int | None = None
     ) -> List[InteractiveElement]:
-        ref_re = re.compile(r"ref=([A-Za-z0-9_-]+)")
-        role_re = re.compile(r"\brole:\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
-        name_re = re.compile(r"\bname:\s*\"([^\"]+)\"", re.IGNORECASE)
-        quoted_re = re.compile(r"\"([^\"]+)\"")
+        ref_re = re.compile(r"\bref\s*[:=]\s*([A-Za-z0-9_-]+|\"[^\"]+\"|'[^']+')")
+        role_re = re.compile(r"\brole\s*:\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
+        name_re = re.compile(r"\bname\s*:\s*(\"[^\"]+\"|'[^']+'|[^,#]+)", re.IGNORECASE)
+        aria_re = re.compile(r"\baria-label\s*:\s*(\"[^\"]+\"|'[^']+'|[^,#]+)", re.IGNORECASE)
+        quoted_re = re.compile(r"\"([^\"]+)\"|'([^']+)'")
         result: List[InteractiveElement] = []
         seen: set[str] = set()
         for line in lines:
-            if "ref=" not in line:
+            if "ref" not in line:
                 continue
             ref_match = ref_re.search(line)
             if not ref_match:
                 continue
-            eid = ref_match.group(1)
+            raw_eid = ref_match.group(1).strip()
+            eid = raw_eid.strip("\"'")
             if eid in seen:
                 continue
             seen.add(eid)
             role_match = role_re.search(line)
-            name_match = name_re.search(line) or quoted_re.search(line)
+            name_match = name_re.search(line) or aria_re.search(line) or quoted_re.search(line)
             disabled = self._bool_from_text(line, "disabled")
             aria_disabled = self._bool_from_text(line, "aria-disabled")
             disabled = self._first_non_none(disabled, aria_disabled)
@@ -271,7 +276,13 @@ class ObservationBuilder:
             if visible is None and hidden is not None:
                 visible = not hidden
             role = role_match.group(1) if role_match else None
-            name = name_match.group(1) if name_match else None
+            name = None
+            if name_match:
+                name = name_match.group(1) or name_match.group(2)
+            if name and (name.startswith("\"") or name.startswith("'")):
+                name = name.strip("\"'")
+            if name:
+                name = name.strip()
             priority = self._priority_for_element(role, name, None, None)
             result.append(
                 InteractiveElement(
