@@ -108,13 +108,7 @@ class AgentRunner:
 
     async def _handle_manual_done(self, text: str) -> None:
         if text.startswith("/"):
-            await self._session.send_message(
-                ServerMessage(
-                    type="agent_message",
-                    payload={"text": "Finish the manual step, then send any message to continue."},
-                )
-            )
-            await self._set_status("waiting_user")
+            await self._handle_manual_command(text)
             return
         run_state = self._session.run_state
         self._session.pending_kind = "none"
@@ -125,6 +119,31 @@ class AgentRunner:
             run_state = RunState()
         run_state.needs_observe = True
         await self._run_chat_loop(user_message=None, run_state=run_state)
+
+    async def _handle_manual_command(self, text: str) -> None:
+        action = self._parse_action(text)
+        if action and action.kind == "observe":
+            observation = await self._observe(count_step=False, run_state=None, take_screenshot=False)
+            await self._session.send_message(
+                ServerMessage(type="agent_message", payload={"text": self._summary(observation)})
+            )
+            await self._set_status("waiting_user")
+            return
+        if action and action.kind == "describe":
+            await self._describe_last()
+            self._session.pending_kind = "manual"
+            return
+        if action and action.kind == "screenshot":
+            await self._call_tool("screenshot", {}, run_state=None, action=action)
+            await self._set_status("waiting_user")
+            return
+        await self._session.send_message(
+            ServerMessage(
+                type="agent_message",
+                payload={"text": "Finish the manual step, then send any message to continue."},
+            )
+        )
+        await self._set_status("waiting_user")
 
     async def _handle_command(self, text: str) -> None:
         command = text.split()[0].lstrip("/").lower()
