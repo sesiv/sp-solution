@@ -21,6 +21,12 @@ class InteractiveElement(BaseModel):
     disabled: bool | None = None
     visible: bool | None = None
     bbox: Dict[str, float] | None = None
+    priority: int | None = None
+
+
+class OverlayAction(BaseModel):
+    text: str
+    eids: List[str] = Field(default_factory=list)
 
 
 class Observation(BaseModel):
@@ -28,6 +34,7 @@ class Observation(BaseModel):
     interactive: List[InteractiveElement] = Field(default_factory=list)
     text_blocks: List[str] = Field(default_factory=list)
     overlays: List[str] = Field(default_factory=list)
+    overlay_actions: List[OverlayAction] = Field(default_factory=list)
 
 
 class Action(BaseModel):
