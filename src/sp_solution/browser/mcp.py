@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List
 from urllib.parse import urlparse
@@ -18,6 +19,7 @@ class MCPError(RuntimeError):
 
 
 MCP_PROTOCOL_VERSION = "2024-11-05"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,6 +45,7 @@ class MCPTransport:
             raise MCPError(f"Unsupported MCP endpoint scheme: {parsed.scheme}")
 
     async def call(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        logger.info("MCP request: %s", {"name": name, "arguments": arguments})
         return await self._impl.call(name, arguments)
 
 
@@ -61,6 +64,7 @@ class MCPWebsocketTransport(MCPTransportImpl):
             await ws.send(json.dumps(payload))
             raw = await ws.recv()
             response = json.loads(raw)
+        logger.info("MCP response: %s", response)
         return _extract_result(response)
 
 
@@ -130,10 +134,14 @@ class MCPHttpTransport(MCPTransportImpl):
             content_type = response.headers.get("content-type", "")
             if "application/json" in content_type:
                 raw = await response.aread()
-                return json.loads(raw)
+                data = json.loads(raw)
+                logger.info("MCP response: %s", data)
+                return data
             if "text/event-stream" in content_type:
                 request_id = str(payload.get("id"))
-                return await self._read_sse_response(response, request_id)
+                data = await self._read_sse_response(response, request_id)
+                logger.info("MCP response: %s", data)
+                return data
         raise MCPError("MCP HTTP request did not return a response")
 
     async def _start_sse_listener(self) -> None:
