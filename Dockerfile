@@ -6,9 +6,18 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY pyproject.toml README.md SAC.md /app/
-COPY src /app/src
+RUN python - <<'PY'
+import pathlib
+import tomllib
 
-RUN pip install .
+data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+deps = data.get("project", {}).get("dependencies", [])
+pathlib.Path("/tmp/requirements.txt").write_text("\n".join(deps))
+PY
+RUN pip install -r /tmp/requirements.txt
+
+COPY src /app/src
+ENV PYTHONPATH=/app/src
 
 EXPOSE 8000
 
