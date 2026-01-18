@@ -175,7 +175,7 @@ class AgentRunner:
 
         while run_state.tool_steps < MAX_TOOL_STEPS:
             if run_state.needs_observe or not self._last_observation:
-                await self._observe(count_step=True, run_state=run_state)
+                await self._observe(count_step=True, run_state=run_state, take_screenshot=True)
                 run_state.needs_observe = False
                 if run_state.tool_steps >= MAX_TOOL_STEPS:
                     break
@@ -289,7 +289,7 @@ class AgentRunner:
             await self._describe_last()
             return
         if action.kind == "observe":
-            observation = await self._observe(count_step=False, run_state=None)
+            observation = await self._observe(count_step=False, run_state=None, take_screenshot=False)
             await self._session.send_message(
                 ServerMessage(type="agent_message", payload={"text": self._summary(observation)})
             )
@@ -352,7 +352,11 @@ class AgentRunner:
 
     async def _execute_action(self, action: Action, run_state: RunState | None) -> None:
         if action.kind == "observe":
-            await self._observe(count_step=run_state is not None, run_state=run_state)
+            await self._observe(
+                count_step=run_state is not None,
+                run_state=run_state,
+                take_screenshot=run_state is not None,
+            )
             return
         if action.kind == "click":
             await self._call_tool(
@@ -379,14 +383,20 @@ class AgentRunner:
         elif action.kind == "screenshot":
             await self._call_tool("screenshot", {}, run_state=run_state, action=action)
 
-    async def _observe(self, count_step: bool, run_state: RunState | None) -> Observation:
+    async def _observe(
+        self,
+        count_step: bool,
+        run_state: RunState | None,
+        take_screenshot: bool,
+    ) -> Observation:
         step_state = run_state if count_step else None
-        await self._call_tool(
-            "screenshot",
-            {},
-            run_state=step_state,
-            action=Action(kind="screenshot"),
-        )
+        if take_screenshot:
+            await self._call_tool(
+                "screenshot",
+                {},
+                run_state=step_state,
+                action=Action(kind="screenshot"),
+            )
         raw = await self._call_tool("observe", {}, run_state=step_state, action=None)
         self._logger.info("Observe raw response: %s", raw)
         observation = self._observer.build(raw)
