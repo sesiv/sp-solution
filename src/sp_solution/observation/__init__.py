@@ -65,6 +65,7 @@ class ObservationBuilder:
         lines = text.splitlines()
         sections = self._split_sections(lines)
         candidates: List[tuple[PageInfo, List[InteractiveElement], List[str]]] = []
+        all_interactive: List[InteractiveElement] = []
         for section in sections:
             page = PageInfo(
                 url=self._find_prefixed(section, "- Page URL:"),
@@ -74,9 +75,10 @@ class ObservationBuilder:
             if not snapshot_lines:
                 continue
             snapshot_data = self._load_snapshot_structured(snapshot_lines)
-            interactive = self._parse_snapshot_interactive(snapshot_lines, snapshot_data)
+            interactive = self._parse_snapshot_interactive(snapshot_lines, snapshot_data, limit=None)
             text_blocks = self._parse_snapshot_text_blocks(snapshot_lines, snapshot_data)
             candidates.append((page, interactive, text_blocks))
+            all_interactive.extend(interactive)
         if not candidates:
             page = PageInfo(
                 url=self._find_prefixed(lines, "- Page URL:"),
@@ -84,14 +86,16 @@ class ObservationBuilder:
             )
             snapshot_lines = self._extract_snapshot_block(lines)
             snapshot_data = self._load_snapshot_structured(snapshot_lines)
-            interactive = self._parse_snapshot_interactive(snapshot_lines, snapshot_data)
+            interactive = self._parse_snapshot_interactive(snapshot_lines, snapshot_data, limit=None)
             text_blocks = self._parse_snapshot_text_blocks(snapshot_lines, snapshot_data)
             return page, interactive, text_blocks
         filtered = [item for item in candidates if self._has_content(item)] or candidates
         non_ads = [item for item in filtered if not self._is_ad_frame(item[0])] or filtered
         with_url = [item for item in non_ads if item[0].url]
         ranked = with_url or non_ads
-        return max(ranked, key=self._score_candidate)
+        best = max(ranked, key=self._score_candidate)
+        merged_interactive = self._merge_interactive_elements(all_interactive)
+        return best[0], merged_interactive, best[2]
 
     def _content_to_text(self, content: List[Any]) -> str:
         parts: List[str] = []
@@ -170,13 +174,16 @@ class ObservationBuilder:
         return score
 
     def _parse_snapshot_interactive(
-        self, lines: List[str], snapshot_data: Any | None = None
+        self,
+        lines: List[str],
+        snapshot_data: Any | None = None,
+        limit: int | None = None,
     ) -> List[InteractiveElement]:
         if snapshot_data is None:
             snapshot_data = self._load_snapshot_structured(lines)
         if snapshot_data is not None:
-            return self._parse_snapshot_interactive_structured(snapshot_data)
-        return self._parse_snapshot_interactive_heuristic(lines)
+            return self._parse_snapshot_interactive_structured(snapshot_data, limit=limit)
+        return self._parse_snapshot_interactive_heuristic(lines, limit=limit)
 
     def _parse_snapshot_text_blocks(
         self, lines: List[str], snapshot_data: Any | None = None
@@ -199,7 +206,9 @@ class ObservationBuilder:
             logger.warning("Failed to parse snapshot YAML: %s", exc)
             return None
 
-    def _parse_snapshot_interactive_structured(self, snapshot_data: Any) -> List[InteractiveElement]:
+    def _parse_snapshot_interactive_structured(
+        self, snapshot_data: Any, limit: int | None = None
+    ) -> List[InteractiveElement]:
         result: List[InteractiveElement] = []
         seen: set[str] = set()
         for node in self._iter_snapshot_dicts(snapshot_data):
@@ -229,11 +238,13 @@ class ObservationBuilder:
                 )
             )
             seen.add(eid)
-            if len(result) >= self.max_interactive:
+            if limit is not None and len(result) >= limit:
                 break
         return result
 
-    def _parse_snapshot_interactive_heuristic(self, lines: List[str]) -> List[InteractiveElement]:
+    def _parse_snapshot_interactive_heuristic(
+        self, lines: List[str], limit: int | None = None
+    ) -> List[InteractiveElement]:
         ref_re = re.compile(r"ref=([A-Za-z0-9_-]+)")
         role_re = re.compile(r"\brole:\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
         name_re = re.compile(r"\bname:\s*\"([^\"]+)\"", re.IGNORECASE)
@@ -272,7 +283,7 @@ class ObservationBuilder:
                     priority=priority,
                 )
             )
-            if len(result) >= self.max_interactive:
+            if limit is not None and len(result) >= limit:
                 break
         return result
 
@@ -506,6 +517,34 @@ class ObservationBuilder:
                 continue
             if base.get(key) is None and value is not None:
                 base[key] = value
+
+    def _merge_interactive_elements(
+        self, elements: Iterable[InteractiveElement]
+    ) -> List[InteractiveElement]:
+        entries: Dict[str, Dict[str, Any]] = {}
+        order: List[str] = []
+        for element in elements:
+            data = element.model_dump()
+            eid = data.get("eid")
+            if not eid:
+                continue
+            if eid not in entries:
+                entries[eid] = data
+                order.append(eid)
+            else:
+                self._merge_interactive_entry(entries[eid], data)
+        merged: List[InteractiveElement] = []
+        for eid in order:
+            entry = entries[eid]
+            if entry.get("priority") is None:
+                entry["priority"] = self._priority_for_element(
+                    entry.get("role"),
+                    entry.get("name"),
+                    entry.get("value"),
+                    entry.get("placeholder"),
+                )
+            merged.append(InteractiveElement(**entry))
+        return merged
 
     def _extract_interactive(self, raw: Dict[str, Any]) -> List[InteractiveElement]:
         candidates: Iterable[Dict[str, Any]] = []
