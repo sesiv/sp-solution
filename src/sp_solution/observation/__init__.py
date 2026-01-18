@@ -70,7 +70,12 @@ class ObservationBuilder:
             interactive = self._parse_snapshot_interactive(snapshot_lines)
             text_blocks = self._parse_snapshot_text_blocks(snapshot_lines)
             return page, interactive, text_blocks
-        best = max(candidates, key=lambda item: (len(item[1]), len(item[2])))
+        filtered = [
+            item for item in candidates if not self._is_ad_frame(item[0]) and self._has_content(item)
+        ]
+        if not filtered:
+            filtered = [item for item in candidates if not self._is_ad_frame(item[0])] or candidates
+        best = max(filtered, key=lambda item: (len(item[1]), len(item[2])))
         return best
 
     def _content_to_text(self, content: List[Any]) -> str:
@@ -118,6 +123,15 @@ class ObservationBuilder:
             end = indices[i + 1] if i + 1 < len(indices) else len(lines)
             sections.append(lines[start:end])
         return sections
+
+    def _is_ad_frame(self, page: PageInfo) -> bool:
+        if not page.url:
+            return False
+        url = page.url.lower()
+        return "safeframe" in url or "doubleclick" in url or "adservice" in url
+
+    def _has_content(self, item: tuple[PageInfo, List[InteractiveElement], List[str]]) -> bool:
+        return bool(item[1] or item[2])
 
     def _parse_snapshot_interactive(self, lines: List[str]) -> List[InteractiveElement]:
         ref_re = re.compile(r"ref=([A-Za-z0-9_-]+)")
