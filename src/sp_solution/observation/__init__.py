@@ -184,9 +184,17 @@ class ObservationBuilder:
     ) -> List[InteractiveElement]:
         if snapshot_data is None:
             snapshot_data = self._load_snapshot_structured(lines)
+        structured: List[InteractiveElement] = []
         if snapshot_data is not None:
-            return self._parse_snapshot_interactive_structured(snapshot_data, limit=limit)
-        return self._parse_snapshot_interactive_heuristic(lines, limit=limit)
+            structured = self._parse_snapshot_interactive_structured(snapshot_data, limit=limit)
+        heuristic = self._parse_snapshot_interactive_heuristic(lines, limit=limit)
+        if structured and heuristic:
+            merged = self._merge_interactive_elements([*structured, *heuristic])
+        else:
+            merged = structured or heuristic
+        if limit is not None:
+            return merged[:limit]
+        return merged
 
     def _parse_snapshot_text_blocks(
         self, lines: List[str], snapshot_data: Any | None = None
