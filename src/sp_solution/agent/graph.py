@@ -380,7 +380,14 @@ class AgentRunner:
             await self._call_tool("screenshot", {}, run_state=run_state, action=action)
 
     async def _observe(self, count_step: bool, run_state: RunState | None) -> Observation:
-        raw = await self._call_tool("observe", {}, run_state=run_state if count_step else None, action=None)
+        step_state = run_state if count_step else None
+        await self._call_tool(
+            "screenshot",
+            {},
+            run_state=step_state,
+            action=Action(kind="screenshot"),
+        )
+        raw = await self._call_tool("observe", {}, run_state=step_state, action=None)
         self._logger.info("Observe raw response: %s", raw)
         observation = self._observer.build(raw)
         self._last_observation = observation
