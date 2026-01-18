@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
 from urllib.parse import urlparse
@@ -64,7 +65,7 @@ class MCPWebsocketTransport(MCPTransportImpl):
             await ws.send(json.dumps(payload))
             raw = await ws.recv()
             response = json.loads(raw)
-        logger.info("MCP response: %s", response)
+        logger.info("MCP response: %s", _redact_log_payload(response))
         return _extract_result(response)
 
 
@@ -135,12 +136,12 @@ class MCPHttpTransport(MCPTransportImpl):
             if "application/json" in content_type:
                 raw = await response.aread()
                 data = json.loads(raw)
-                logger.info("MCP response: %s", data)
+                logger.info("MCP response: %s", _redact_log_payload(data))
                 return data
             if "text/event-stream" in content_type:
                 request_id = str(payload.get("id"))
                 data = await self._read_sse_response(response, request_id)
-                logger.info("MCP response: %s", data)
+                logger.info("MCP response: %s", _redact_log_payload(data))
                 return data
         raise MCPError("MCP HTTP request did not return a response")
 
@@ -356,6 +357,38 @@ def _match_response(messages: List[Dict[str, Any]], request_id: str | None) -> D
         if message.get("id") == request_id:
             return message
     return None
+
+
+def _redact_log_payload(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        return {key: _redact_log_payload_with_key(value, key) for key, value in payload.items()}
+    if isinstance(payload, list):
+        return [_redact_log_payload(item) for item in payload]
+    return _redact_log_payload_with_key(payload, None)
+
+
+def _redact_log_payload_with_key(value: Any, key: str | None) -> Any:
+    if isinstance(value, dict):
+        return {item_key: _redact_log_payload_with_key(item_value, item_key) for item_key, item_value in value.items()}
+    if isinstance(value, list):
+        return [_redact_log_payload_with_key(item, key) for item in value]
+    if isinstance(value, str):
+        lowered = key.lower() if key else ""
+        if lowered in {"screenshot", "image", "png", "jpeg", "jpg", "base64", "data"}:
+            return f"<redacted {len(value)} chars>"
+        if len(value) > 500 and (_looks_like_base64(value) or value.startswith("data:image")):
+            return f"<redacted {len(value)} chars>"
+        if len(value) > 800:
+            return f"{value[:200]}...<{len(value)} chars>"
+    return value
+
+
+def _looks_like_base64(value: str) -> bool:
+    if len(value) < 200:
+        return False
+    if len(value) % 4 != 0:
+        return False
+    return re.fullmatch(r"[A-Za-z0-9+/=]+", value) is not None
 
 
 def _extract_result(response: Dict[str, Any]) -> Dict[str, Any]:

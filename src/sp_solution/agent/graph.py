@@ -651,4 +651,14 @@ class AgentRunner:
                 summary["text_chars"] = text_chars
             return summary
         keys = list(result.keys())[:5]
-        return {key: result[key] for key in keys}
+        return {key: AgentRunner._redact_log_value(result[key]) for key in keys}
+
+    @staticmethod
+    def _redact_log_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {key: AgentRunner._redact_log_value(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [AgentRunner._redact_log_value(item) for item in value]
+        if isinstance(value, str) and len(value) > 500:
+            return f"<omitted {len(value)} chars>"
+        return value
