@@ -456,8 +456,12 @@ class LangGraphAgent:
         return "maybe_observe"
 
     async def _observe(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        screenshot = await self._call_tool(state, "screenshot", {}, Action(kind="screenshot"))
-        state["last_screenshot"] = self._extract_screenshot(screenshot)
+        try:
+            screenshot = await self._call_tool(state, "screenshot", {}, Action(kind="screenshot"))
+            state["last_screenshot"] = self._extract_screenshot(screenshot)
+        except ToolError:
+            # Screenshot failures should not block observation or the agent loop.
+            state["last_screenshot"] = None
         raw = await self._call_tool(state, "observe", {}, Action(kind="observe"))
         logger.info("Observe raw response: %s", raw)
         observation = self._observer.build(raw)
