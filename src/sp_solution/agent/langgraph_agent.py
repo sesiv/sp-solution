@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentState(TypedDict, total=False):
+    user_message: Optional[str]
     messages: List[BaseMessage]
     last_user_message: Optional[str]
     last_observation: Optional[Observation]
@@ -144,6 +145,7 @@ class LangGraphAgent:
         if needs_observe is None:
             needs_observe = True
         return {
+            "user_message": state.get("user_message"),
             "messages": list(state.get("messages") or []),
             "last_user_message": state.get("last_user_message"),
             "last_observation": state.get("last_observation"),
@@ -162,7 +164,7 @@ class LangGraphAgent:
 
     async def ingest_user_input(self, state: Dict[str, Any]) -> Dict[str, Any]:
         merged = self._state_with_defaults(state)
-        text = state.get("user_message")
+        text = merged.get("user_message")
         if isinstance(text, str):
             cleaned = text.strip()
             if cleaned:
@@ -186,6 +188,7 @@ class LangGraphAgent:
                         merged["final_response"] = "Unknown command."
                         merged["needs_observe"] = False
                         merged["single_step"] = True
+        merged["user_message"] = None
         return merged
 
     async def maybe_observe(self, state: Dict[str, Any]) -> Dict[str, Any]:
