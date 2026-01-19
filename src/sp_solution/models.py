@@ -41,7 +41,6 @@ class Action(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     kind: Literal[
         "observe",
-        "describe",
         "launch",
         "click",
         "type",

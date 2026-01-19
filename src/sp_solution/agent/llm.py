@@ -164,36 +164,6 @@ def _openrouter_extra_body(settings: Settings) -> Dict[str, Any] | None:
     return {"provider": {"order": providers}}
 
 
-class LLMDescriber:
-    def __init__(self, settings: Settings) -> None:
-        self._client: Optional[ChatOpenAI] = None
-        if settings.openrouter_api_key:
-            extra_body = _openrouter_extra_body(settings)
-            self._client = ChatOpenAI(
-                model=settings.openrouter_model,
-                api_key=settings.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                extra_body=extra_body,
-            )
-
-    async def describe(self, observation: Observation) -> str:
-        if not self._client:
-            raise RuntimeError("OpenRouter client is not configured. Set OPENROUTER_API_KEY.")
-        prompt = (
-            "You are an assistant summarizing a browser observation for an agent. "
-            "Be concise, mention page title/url, key interactive elements, and any overlays."
-        )
-        cleaned = _clean_observation_for_llm(observation)
-        message = HumanMessage(
-            content=f"{prompt}\n\nObservation: {json.dumps(cleaned, ensure_ascii=False)}"
-        )
-        try:
-            response = await self._client.ainvoke([message])
-        except Exception as exc:
-            raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
-        return response.content.strip()
-
-
 @dataclass
 class ActionContext:
     user_message: str | None

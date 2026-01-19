@@ -10,7 +10,7 @@ from ..models import Action, Event, Observation, ServerMessage, InteractiveEleme
 from ..observation import ObservationBuilder
 from ..policy import PolicyGate
 from ..session import RunState, Session
-from .llm import ActionContext, LLMActionPlanner, LLMDescriber
+from .llm import ActionContext, LLMActionPlanner
 
 
 MAX_TOOL_STEPS = 10
@@ -24,7 +24,6 @@ class AgentRunner:
         self._browser: MCPBrowserClient | None = None
         self._observer = ObservationBuilder()
         self._policy = PolicyGate()
-        self._describer = LLMDescriber(settings)
         self._planner = LLMActionPlanner(settings)
         self._last_observation: Observation | None = None
         self._logger = logging.getLogger(__name__)
@@ -128,10 +127,6 @@ class AgentRunner:
                 ServerMessage(type="agent_message", payload={"text": self._summary(observation)})
             )
             await self._set_status("waiting_user")
-            return
-        if action and action.kind == "describe":
-            await self._describe_last()
-            self._session.pending_kind = "manual"
             return
         if action and action.kind == "screenshot":
             await self._call_tool("screenshot", {}, run_state=None, action=action)
@@ -304,9 +299,6 @@ class AgentRunner:
         self._session.run_state = None
 
     async def _handle_action(self, action: Action) -> None:
-        if action.kind == "describe":
-            await self._describe_last()
-            return
         if action.kind == "observe":
             observation = await self._observe(count_step=False, run_state=None, take_screenshot=False)
             await self._session.send_message(
@@ -346,27 +338,6 @@ class AgentRunner:
             await self._set_status("waiting_user")
             return
         await self._execute_action(action, run_state=None)
-        await self._set_status("waiting_user")
-
-    async def _describe_last(self) -> None:
-        if not self._last_observation:
-            await self._session.send_message(
-                ServerMessage(
-                    type="agent_message",
-                    payload={"text": "No observation yet. Use /observe first."},
-                )
-            )
-            await self._set_status("waiting_user")
-            return
-        try:
-            description = await self._describer.describe(self._last_observation)
-            await self._session.send_message(
-                ServerMessage(type="agent_message", payload={"text": description})
-            )
-        except Exception as exc:
-            await self._session.send_message(
-                ServerMessage(type="agent_message", payload={"text": f"Describe failed: {exc}"})
-            )
         await self._set_status("waiting_user")
 
     async def _execute_action(self, action: Action, run_state: RunState | None) -> None:
@@ -561,8 +532,6 @@ class AgentRunner:
         command = tokens[0].lstrip("/").lower()
         if command == "observe":
             return Action(kind="observe")
-        if command == "describe":
-            return Action(kind="describe")
         if command == "launch":
             return Action(kind="launch")
         if command == "click" and len(tokens) >= 2:
