@@ -178,6 +178,19 @@ def _openrouter_extra_body(settings: Settings) -> Dict[str, Any] | None:
     return {"provider": {"order": providers}}
 
 
+def _build_chat_client(settings: Settings) -> ChatOpenAI | None:
+    if not settings.openrouter_api_key:
+        return None
+    extra_body = _openrouter_extra_body(settings)
+    return ChatOpenAI(
+        model=settings.openrouter_model,
+        api_key=settings.openrouter_api_key,
+        base_url="https://openrouter.ai/api/v1",
+        temperature=0.2,
+        extra_body=extra_body,
+    )
+
+
 def _messages_to_history(messages: list[BaseMessage]) -> list[dict[str, str]]:
     history: list[dict[str, str]] = []
     for msg in messages[-20:]:
@@ -214,9 +227,34 @@ class PlannerAction(BaseModel):
     final_response: str | None = None
 
 
+class PlanOutput(BaseModel):
+    plan: list[str] = Field(min_length=1, max_length=6)
+    facts: list[str] | None = None
+    missing: list[str] | None = None
+
+
+class ProgressState(BaseModel):
+    current_index: int = 0
+    done: list[str] = Field(default_factory=list)
+    blocked: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
+class WorkingStateUpdate(BaseModel):
+    progress: ProgressState | None = None
+    facts: list[str] | None = None
+    missing: list[str] | None = None
+    needs_replan: bool | None = None
+
+
 @dataclass
 class ActionContext:
     user_message: str | None
+    current_goal: str | None
+    plan: list[str]
+    progress: dict[str, Any] | None
+    facts: list[str]
+    missing: list[str]
     observation: Observation | None
     steps_taken: int
     max_steps: int
@@ -225,18 +263,30 @@ class ActionContext:
     screenshot: dict[str, str] | None
 
 
+@dataclass
+class PlanContext:
+    current_goal: str
+    facts: list[str]
+    missing: list[str]
+    messages: list[BaseMessage]
+
+
+@dataclass
+class StateUpdateContext:
+    current_goal: str | None
+    plan: list[str]
+    progress: dict[str, Any] | None
+    facts: list[str]
+    missing: list[str]
+    last_action: dict[str, Any] | None
+    last_tool_result: dict[str, Any] | None
+    observation: Observation | None
+    steps_taken: int
+
+
 class LLMActionPlanner:
     def __init__(self, settings: Settings) -> None:
-        self._client: ChatOpenAI | None = None
-        if settings.openrouter_api_key:
-            extra_body = _openrouter_extra_body(settings)
-            self._client = ChatOpenAI(
-                model=settings.openrouter_model,
-                api_key=settings.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-                temperature=0.2,
-                extra_body=extra_body,
-            )
+        self._client: ChatOpenAI | None = _build_chat_client(settings)
         self._structured = self._client.with_structured_output(PlannerAction) if self._client else None
         self._logger = logging.getLogger(__name__)
 
@@ -285,6 +335,11 @@ class LLMActionPlanner:
         return json.dumps(
             {
                 "user_message": context.user_message,
+                "current_goal": context.current_goal,
+                "plan": context.plan,
+                "progress": context.progress,
+                "facts": context.facts,
+                "missing": context.missing,
                 "steps_taken": context.steps_taken,
                 "max_steps": context.max_steps,
                 "recent_steps": context.recent_steps,
@@ -296,9 +351,86 @@ class LLMActionPlanner:
         )
 
 
+class LLMPlanBuilder:
+    def __init__(self, settings: Settings) -> None:
+        self._client: ChatOpenAI | None = _build_chat_client(settings)
+        self._structured = self._client.with_structured_output(PlanOutput) if self._client else None
+        self._logger = logging.getLogger(__name__)
+
+    def available(self) -> bool:
+        return self._client is not None
+
+    async def build_plan(self, context: PlanContext) -> PlanOutput:
+        if not self._structured:
+            raise RuntimeError("OpenRouter client is not configured. Set OPENROUTER_API_KEY.")
+        prompt = json.dumps(
+            {
+                "current_goal": context.current_goal,
+                "facts": context.facts,
+                "missing": context.missing,
+                "chat_history": _messages_to_history(context.messages),
+            },
+            ensure_ascii=False,
+        )
+        messages = [
+            SystemMessage(content=_PLAN_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ]
+        try:
+            response = await self._structured.ainvoke(messages)
+        except Exception as exc:
+            raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
+        if isinstance(response, dict):
+            parsed = PlanOutput.model_validate(response)
+        else:
+            parsed = response
+        self._logger.info("LLM plan response: %s", parsed)
+        return parsed
+
+
+class LLMStateUpdater:
+    def __init__(self, settings: Settings) -> None:
+        self._client: ChatOpenAI | None = _build_chat_client(settings)
+        self._structured = self._client.with_structured_output(WorkingStateUpdate) if self._client else None
+        self._logger = logging.getLogger(__name__)
+
+    def available(self) -> bool:
+        return self._client is not None
+
+    async def update_state(self, context: StateUpdateContext) -> WorkingStateUpdate:
+        if not self._structured:
+            raise RuntimeError("OpenRouter client is not configured. Set OPENROUTER_API_KEY.")
+        observation = _clean_observation_for_llm(context.observation) if context.observation else None
+        payload = {
+            "current_goal": context.current_goal,
+            "plan": context.plan,
+            "progress": context.progress,
+            "facts": context.facts,
+            "missing": context.missing,
+            "last_action": context.last_action,
+            "last_tool_result": context.last_tool_result,
+            "observation": observation,
+            "steps_taken": context.steps_taken,
+        }
+        messages = [
+            SystemMessage(content=_STATE_UPDATE_PROMPT),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ]
+        try:
+            response = await self._structured.ainvoke(messages)
+        except Exception as exc:
+            raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
+        if isinstance(response, dict):
+            parsed = WorkingStateUpdate.model_validate(response)
+        else:
+            parsed = response
+        self._logger.info("LLM state update: %s", parsed)
+        return parsed
+
+
 _ACTION_SYSTEM_PROMPT = (
     "You are a browser automation agent. Select the next single action to take. "
-    "Use only the provided observation (including any screenshot-derived cues) and goal. "
+    "Use only the provided observation (including any screenshot-derived cues), current_goal, plan, and progress. "
     "Always ground decisions in what is visible, and pick only the minimal relevant selectors. "
     "Do not invent selectors or URLs. "
     "Allowed actions: observe, click, type, scroll, wait, screenshot, need_user, stop. "
@@ -308,6 +440,25 @@ _ACTION_SYSTEM_PROMPT = (
     "When scrolling, provide 'direction' (up/down) and 'amount'. "
     "When waiting, provide 'ms'. "
     "When stopping, provide 'final_response'."
+)
+
+
+_PLAN_SYSTEM_PROMPT = (
+    "You are a planning assistant for a browser automation agent. "
+    "Produce a short plan of 3-6 steps to achieve the current goal. "
+    "The final step must be answering the user with results. "
+    "Do not include raw DOM, selectors, or element ids. "
+    "Keep steps concise and action-oriented."
+)
+
+
+_STATE_UPDATE_PROMPT = (
+    "You update the agent working state after one action. "
+    "Use the current goal, plan, progress, facts, missing, last action/result, and observation. "
+    "Update progress (current_index, done, blocked, note) conservatively. "
+    "Update facts and missing with short generalized statements. "
+    "Never include raw page text, DOM, or element ids in facts/missing/progress. "
+    "Set needs_replan true if the current plan is no longer valid."
 )
 
 

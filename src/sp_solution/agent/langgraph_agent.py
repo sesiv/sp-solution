@@ -18,7 +18,7 @@ from ..config import Settings
 from ..models import Action, Event, Observation, PolicyDecision, ServerMessage, InteractiveElement
 from ..observation import ObservationBuilder
 from ..policy import PolicyGate
-from .llm import ActionContext, LLMActionPlanner
+from .llm import ActionContext, LLMActionPlanner, LLMPlanBuilder, LLMStateUpdater, PlanContext, StateUpdateContext
 
 
 MAX_TOOL_STEPS = 10
@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 class AgentState(TypedDict, total=False):
     user_message: Optional[str]
     messages: List[BaseMessage]
+    current_goal: Optional[str]
+    plan: List[str]
+    progress: Dict[str, Any] | None
+    facts: List[str]
+    missing: List[str]
+    needs_plan: bool
     last_user_message: Optional[str]
     last_observation: Optional[Observation]
     last_screenshot: Optional[dict[str, str]]
@@ -57,6 +63,8 @@ class LangGraphAgent:
         self._observer = ObservationBuilder()
         self._policy = PolicyGate()
         self._planner = LLMActionPlanner(settings)
+        self._plan_builder = LLMPlanBuilder(settings)
+        self._state_updater = LLMStateUpdater(settings)
         self._graph = self._build_graph()
 
     def planner_available(self) -> bool:
@@ -69,6 +77,7 @@ class LangGraphAgent:
     def _build_graph(self) -> Any:
         builder = StateGraph(AgentState)
         builder.add_node("ingest_user_input", self.ingest_user_input)
+        builder.add_node("build_plan", self.build_plan)
         builder.add_node("maybe_observe", self.maybe_observe)
         builder.add_node("plan_action", self.plan_action)
         builder.add_node("validate_action", self.validate_action)
@@ -83,7 +92,8 @@ class LangGraphAgent:
         builder.add_node("finalize_limit", self.finalize_limit)
 
         builder.set_entry_point("ingest_user_input")
-        builder.add_edge("ingest_user_input", "maybe_observe")
+        builder.add_edge("ingest_user_input", "build_plan")
+        builder.add_edge("build_plan", "maybe_observe")
         builder.add_conditional_edges(
             "maybe_observe",
             self._route_after_observe,
@@ -126,6 +136,7 @@ class LangGraphAgent:
             "execute_action",
             self._route_after_execute,
             {
+                "build_plan": "build_plan",
                 "maybe_observe": "maybe_observe",
                 "finalize_done": "finalize_done",
                 "finalize_limit": "finalize_limit",
@@ -144,9 +155,18 @@ class LangGraphAgent:
         needs_observe = state.get("needs_observe")
         if needs_observe is None:
             needs_observe = True
+        needs_plan = state.get("needs_plan")
+        if needs_plan is None:
+            needs_plan = False
         return {
             "user_message": state.get("user_message"),
             "messages": list(state.get("messages") or []),
+            "current_goal": state.get("current_goal"),
+            "plan": list(state.get("plan") or []),
+            "progress": state.get("progress"),
+            "facts": list(state.get("facts") or []),
+            "missing": list(state.get("missing") or []),
+            "needs_plan": bool(needs_plan),
             "last_user_message": state.get("last_user_message"),
             "last_observation": state.get("last_observation"),
             "last_screenshot": state.get("last_screenshot"),
@@ -183,11 +203,23 @@ class LangGraphAgent:
                     if action:
                         merged["planned_action"] = action
                         merged["needs_observe"] = action.kind in {"observe", "click", "type"}
+                        merged["needs_plan"] = False
                         merged["single_step"] = True
                     else:
                         merged["final_response"] = "Unknown command."
                         merged["needs_observe"] = False
+                        merged["needs_plan"] = False
                         merged["single_step"] = True
+                else:
+                    if self._is_continue_message(cleaned) and merged.get("current_goal"):
+                        merged["needs_plan"] = False
+                    else:
+                        merged["current_goal"] = cleaned
+                        merged["needs_plan"] = True
+                        merged["plan"] = []
+                        merged["progress"] = None
+                        merged["facts"] = []
+                        merged["missing"] = []
         merged["user_message"] = None
         return merged
 
@@ -196,6 +228,8 @@ class LangGraphAgent:
         if not merged.get("single_step"):
             merged["planned_action"] = None
         if merged.get("final_response"):
+            return merged
+        if merged.get("needs_plan"):
             return merged
         action = merged.get("planned_action")
         if merged.get("single_step") and action and action.kind in {"screenshot", "scroll", "wait", "launch"}:
@@ -206,13 +240,51 @@ class LangGraphAgent:
             merged["needs_observe"] = False
         return merged
 
+    async def build_plan(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        merged = self._state_with_defaults(state)
+        if merged.get("single_step") or not merged.get("needs_plan"):
+            return merged
+        goal = merged.get("current_goal")
+        if not goal:
+            merged["final_response"] = "No goal provided. Tell me what to do next."
+            return merged
+        if not self._plan_builder.available():
+            merged["final_response"] = "LLM is not configured. Set OPENROUTER_API_KEY to use chat mode."
+            return merged
+        context = PlanContext(
+            current_goal=goal,
+            facts=list(merged.get("facts") or []),
+            missing=list(merged.get("missing") or []),
+            messages=list(merged.get("messages") or []),
+        )
+        try:
+            output = await self._plan_builder.build_plan(context)
+        except Exception as exc:
+            merged["final_response"] = f"Plan failed: {exc}"
+            return merged
+        plan = self._normalize_plan(output.plan)
+        merged["plan"] = plan
+        merged["progress"] = self._default_progress()
+        merged["needs_plan"] = False
+        merged["facts"] = self._merge_items(merged.get("facts"), output.facts)
+        merged["missing"] = self._merge_items(merged.get("missing"), output.missing)
+        return merged
+
     async def plan_action(self, state: Dict[str, Any]) -> Dict[str, Any]:
         merged = self._state_with_defaults(state)
+        if merged.get("needs_plan") or not merged.get("plan"):
+            merged["final_response"] = "Plan is not ready. Provide a goal or clarify the task."
+            return merged
         if not self._planner.available():
             merged["final_response"] = "LLM is not configured. Set OPENROUTER_API_KEY to use chat mode."
             return merged
         context = ActionContext(
             user_message=merged.get("last_user_message"),
+            current_goal=merged.get("current_goal"),
+            plan=list(merged.get("plan") or []),
+            progress=merged.get("progress"),
+            facts=list(merged.get("facts") or []),
+            missing=list(merged.get("missing") or []),
             observation=merged.get("last_observation"),
             steps_taken=merged.get("tool_steps", 0),
             max_steps=MAX_TOOL_STEPS,
@@ -319,6 +391,7 @@ class LangGraphAgent:
         if not action:
             merged["final_response"] = "No action planned."
             return merged
+        tool_summary = None
         try:
             if action.kind == "observe":
                 if merged.get("single_step"):
@@ -328,9 +401,9 @@ class LangGraphAgent:
                 else:
                     merged = await self._observe(merged)
             elif action.kind == "launch":
-                await self._call_tool(merged, "launch", {}, action)
+                _, tool_summary = await self._call_tool(merged, "launch", {}, action)
             elif action.kind == "click":
-                await self._call_tool(
+                _, tool_summary = await self._call_tool(
                     merged,
                     "click",
                     {"eid": action.eid, "element": self._describe_element(action.eid, merged)},
@@ -338,7 +411,7 @@ class LangGraphAgent:
                 )
                 merged["needs_observe"] = True
             elif action.kind == "type":
-                await self._call_tool(
+                _, tool_summary = await self._call_tool(
                     merged,
                     "type",
                     {
@@ -350,19 +423,24 @@ class LangGraphAgent:
                 )
                 merged["needs_observe"] = True
             elif action.kind == "scroll":
-                await self._call_tool(merged, "scroll", action.args, action)
+                _, tool_summary = await self._call_tool(merged, "scroll", action.args, action)
                 merged["needs_observe"] = True
             elif action.kind == "wait":
-                await self._call_tool(merged, "wait", action.args, action)
+                _, tool_summary = await self._call_tool(merged, "wait", action.args, action)
                 merged["needs_observe"] = True
             elif action.kind == "screenshot":
-                await self._call_tool(merged, "screenshot", {}, action)
+                _, tool_summary = await self._call_tool(merged, "screenshot", {}, action)
             elif action.kind == "stop":
                 merged["final_response"] = action.final_response or "Stopping."
             else:
                 merged["final_response"] = f"Unknown action '{action.kind}'."
         except ToolError as exc:
-            merged["final_response"] = f"Tool failed: {exc}"
+            error_note = self._summarize_error(str(exc))
+            self._record_blocked_step(merged, action, error_note)
+            merged["final_response"] = f"Tool failed: {error_note}."
+            return merged
+        if action.kind not in {"observe", "screenshot", "stop"} and not merged.get("single_step"):
+            await self._update_working_state(merged, action, tool_summary)
         return merged
 
     async def finalize_done(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -416,6 +494,8 @@ class LangGraphAgent:
             return "finalize_done"
         if tool_steps >= MAX_TOOL_STEPS:
             return "finalize_limit"
+        if state.get("needs_plan"):
+            return "build_plan"
         if state.get("planned_action") is not None:
             return "validate_action"
         return "plan_action"
@@ -451,6 +531,8 @@ class LangGraphAgent:
             return "finalize_done"
         if state.get("single_step"):
             return "finalize_done"
+        if state.get("needs_plan"):
+            return "build_plan"
         action = state.get("planned_action")
         if action and action.kind == "stop":
             return "finalize_done"
@@ -460,12 +542,12 @@ class LangGraphAgent:
 
     async def _observe(self, state: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            screenshot = await self._call_tool(state, "screenshot", {}, Action(kind="screenshot"))
+            screenshot, _ = await self._call_tool(state, "screenshot", {}, Action(kind="screenshot"))
             state["last_screenshot"] = self._extract_screenshot(screenshot)
         except ToolError:
             # Screenshot failures should not block observation or the agent loop.
             state["last_screenshot"] = None
-        raw = await self._call_tool(state, "observe", {}, Action(kind="observe"))
+        raw, _ = await self._call_tool(state, "observe", {}, Action(kind="observe"))
         logger.info("Observe raw response: %s", raw)
         observation = self._observer.build(raw)
         state["last_observation"] = observation
@@ -484,7 +566,7 @@ class LangGraphAgent:
         name: str,
         args: Dict[str, Any],
         action: Action | None,
-    ) -> Dict[str, Any]:
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
         await self._session.publish_event(
             Event.create("tool_call", self._session.session_id, {"name": name, "args": args})
         )
@@ -522,7 +604,7 @@ class LangGraphAgent:
             )
         )
         self._record_step(state, action, summary)
-        return result
+        return result, summary
 
     def _record_step(self, state: Dict[str, Any], action: Action | None, summary: Dict[str, Any]) -> None:
         label = self._format_action_label(action)
@@ -531,7 +613,7 @@ class LangGraphAgent:
 
     def _record_failure(self, state: Dict[str, Any], action: Action | None, error: str) -> None:
         label = self._format_action_label(action)
-        state["failures"].append(f"{label} -> {error}")
+        state["failures"].append(f"{label} -> {self._summarize_error(error)}")
         logger.info("Step failed: %s", {"action": label, "error": error})
 
     def _record_validation_failure(self, state: Dict[str, Any], action: Action, error: str) -> None:
@@ -540,13 +622,161 @@ class LangGraphAgent:
         state["steps"].append(f"{label} -> skipped ({error})")
         logger.info("Validation blocked action: %s", {"action": label, "error": error})
 
+    def _record_blocked_step(self, state: Dict[str, Any], action: Action | None, error: str) -> None:
+        label = self._format_action_label(action)
+        progress = state.get("progress") or self._default_progress()
+        blocked = list(progress.get("blocked") or [])
+        blocked.append(f"{label}: {error}")
+        progress["blocked"] = blocked[-6:]
+        state["progress"] = progress
+
+    def _summarize_error(self, error: str) -> str:
+        if not error:
+            return "tool error"
+        lowered = error.lower()
+        if "timeout" in lowered:
+            return "timeout"
+        if "not found" in lowered or "no such element" in lowered:
+            return "element not found"
+        if "detached" in lowered:
+            return "element detached"
+        if "disabled" in lowered:
+            return "element disabled"
+        if "navigation" in lowered:
+            return "navigation error"
+        return "tool error"
+
+    def _default_progress(self) -> Dict[str, Any]:
+        return {"current_index": 0, "done": [], "blocked": [], "note": None}
+
+    def _normalize_plan(self, plan: List[str]) -> List[str]:
+        cleaned = [self._sanitize_text(item) for item in plan]
+        cleaned = [item for item in cleaned if item]
+        if not cleaned:
+            cleaned = ["Open the target page.", "Collect the required information.", "Answer the user."]
+        if len(cleaned) < 3:
+            cleaned.extend(
+                ["Collect the required information.", "Answer the user."][: 3 - len(cleaned)]
+            )
+        if len(cleaned) > 6:
+            cleaned = cleaned[:5] + [cleaned[-1]]
+        last = cleaned[-1].lower()
+        if not any(token in last for token in ("answer", "respond", "reply", "ответ")):
+            cleaned[-1] = "Answer the user with results."
+        return cleaned
+
+    def _sanitize_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        lowered = text.lower()
+        if "eid" in lowered or "ref=" in lowered:
+            return None
+        if len(text) > 200:
+            text = text[:200].rstrip()
+        return text
+
+    def _merge_items(self, base: Any, updates: Any) -> List[str]:
+        result: List[str] = []
+        for item in base or []:
+            cleaned = self._sanitize_text(item)
+            if cleaned and cleaned not in result:
+                result.append(cleaned)
+        for item in updates or []:
+            cleaned = self._sanitize_text(item)
+            if cleaned and cleaned not in result:
+                result.append(cleaned)
+        return result[:20]
+
+    def _sanitize_progress(self, progress: Dict[str, Any]) -> Dict[str, Any]:
+        done = [self._sanitize_text(item) for item in progress.get("done", [])]
+        blocked = [self._sanitize_text(item) for item in progress.get("blocked", [])]
+        note = self._sanitize_text(progress.get("note"))
+        progress["done"] = [item for item in done if item]
+        progress["blocked"] = [item for item in blocked if item]
+        progress["note"] = note
+        return progress
+
+    def _is_continue_message(self, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        return normalized in {
+            "ok",
+            "okay",
+            "yes",
+            "y",
+            "да",
+            "ок",
+            "окей",
+            "продолжай",
+            "продолжить",
+            "continue",
+            "go on",
+        }
+
+    async def _update_working_state(
+        self, state: Dict[str, Any], action: Action | None, tool_summary: Dict[str, Any] | None
+    ) -> None:
+        if not self._state_updater.available():
+            return
+        if not state.get("plan"):
+            return
+        redacted_action = self._redact_action(action)
+        context = StateUpdateContext(
+            current_goal=state.get("current_goal"),
+            plan=list(state.get("plan") or []),
+            progress=state.get("progress"),
+            facts=list(state.get("facts") or []),
+            missing=list(state.get("missing") or []),
+            last_action=redacted_action,
+            last_tool_result=tool_summary,
+            observation=state.get("last_observation"),
+            steps_taken=int(state.get("tool_steps") or 0),
+        )
+        try:
+            update = await self._state_updater.update_state(context)
+        except Exception as exc:
+            logger.info("State update skipped: %s", exc)
+            return
+        if update.progress:
+            progress = update.progress.model_dump()
+            if "current_index" in progress:
+                try:
+                    current_index = int(progress["current_index"])
+                except (TypeError, ValueError):
+                    current_index = 0
+                plan_len = len(state.get("plan") or [])
+                if plan_len:
+                    current_index = max(0, min(current_index, plan_len - 1))
+                progress["current_index"] = current_index
+            state["progress"] = self._sanitize_progress(progress)
+        elif not state.get("progress"):
+            state["progress"] = self._default_progress()
+        state["facts"] = self._merge_items(state.get("facts"), update.facts)
+        state["missing"] = self._merge_items(state.get("missing"), update.missing)
+        if update.needs_replan:
+            state["needs_plan"] = True
+
+    def _redact_action(self, action: Action | None) -> dict[str, Any] | None:
+        if action is None:
+            return None
+        payload = action.model_dump()
+        payload.pop("id", None)
+        payload.pop("eid", None)
+        payload.pop("value", None)
+        if payload.get("args"):
+            allowed = {"direction", "amount", "timeout_ms"}
+            payload["args"] = {key: value for key, value in payload["args"].items() if key in allowed}
+        return payload
+
     def _format_action_label(self, action: Action | None) -> str:
         if action is None:
             return "observe"
         if action.kind == "click":
-            return f"click {action.eid}"
+            return "click element"
         if action.kind == "type":
-            return f"type {action.eid}"
+            return "type into field"
         if action.kind == "scroll":
             direction = action.args.get("direction", "down")
             amount = action.args.get("amount", 600)
@@ -655,6 +885,8 @@ class LangGraphAgent:
     def _build_limit_summary(self, state: Dict[str, Any]) -> str:
         steps = state.get("steps") or []
         failures = state.get("failures") or []
+        progress = state.get("progress") or {}
+        missing = state.get("missing") or []
         done = "; ".join(steps[:6])
         if len(steps) > 6:
             done = f"{done}; ..."
@@ -667,8 +899,24 @@ class LangGraphAgent:
             failure_line = f"Failures: {failure_text}."
         else:
             failure_line = "Failures: none."
+        progress_note = progress.get("note")
+        current_index = progress.get("current_index")
+        progress_line = ""
+        if isinstance(current_index, int):
+            progress_line = f"Progress step: {current_index + 1}."
+        if progress_note:
+            progress_line = f"{progress_line} {progress_note}".strip()
+        if missing:
+            missing_line = f"Missing: {', '.join(missing[:4])}."
+        else:
+            missing_line = "Missing: none."
         next_step = "Next step: continue with the current task."
-        return f"Steps: {done}. {failure_line} {next_step}"
+        parts = [f"Steps: {done}.", failure_line]
+        if progress_line:
+            parts.append(progress_line)
+        parts.append(missing_line)
+        parts.append(next_step)
+        return " ".join(part for part in parts if part)
 
     @staticmethod
     def _summary(observation: Observation) -> str:
