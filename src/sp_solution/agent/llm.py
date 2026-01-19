@@ -171,6 +171,7 @@ class ActionContext:
     steps_taken: int
     max_steps: int
     recent_steps: list[str]
+    chat_history: list[dict[str, str]]
 
 
 class LLMActionPlanner:
@@ -220,6 +221,7 @@ class LLMActionPlanner:
                 "max_steps": context.max_steps,
                 "recent_steps": context.recent_steps,
                 "observation": observation,
+                "chat_history": context.chat_history,
             },
             ensure_ascii=False,
         )

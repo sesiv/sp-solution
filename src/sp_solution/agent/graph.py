@@ -168,6 +168,7 @@ class AgentRunner:
         await self._set_status("waiting_user")
 
     async def _handle_chat_message(self, text: str) -> None:
+        self._session.record_chat("user", text)
         await self._run_chat_loop(user_message=text, run_state=None)
 
     async def _run_chat_loop(self, user_message: Optional[str], run_state: RunState | None) -> None:
@@ -200,6 +201,7 @@ class AgentRunner:
                 steps_taken=run_state.tool_steps,
                 max_steps=MAX_TOOL_STEPS,
                 recent_steps=run_state.steps[-5:],
+                chat_history=list(self._session.chat_history),
             )
             action = await self._planner.next_action(context)
             if action.kind == "stop":
