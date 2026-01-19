@@ -229,7 +229,9 @@ class LLMActionPlanner:
 
 _ACTION_SYSTEM_PROMPT = (
     "You are a browser automation agent. Select the next single action to take. "
-    "Use only the provided observation and goal. Do not invent selectors or URLs. "
+    "Use only the provided observation (including any screenshot-derived cues) and goal. "
+    "Always ground decisions in what is visible, and pick only the minimal relevant selectors. "
+    "Do not invent selectors or URLs. "
     "Output only JSON with one action. Allowed actions:\n"
     "- observe\n"
     "- click (requires eid)\n"
