@@ -1,0 +1,130 @@
+╭─sergei@desktop ~/work/testovie zadaniya/sp solution ‹main●› 
+╰─$ ./scripts/repl.sh 
+WARN[0000] The "MCP_PACKAGE" variable is not set. Defaulting to a blank string. 
+WARN[0000] The "MCP_CMD" variable is not set. Defaulting to a blank string. 
+WARN[0000] No services to build                         
+[+] up 3/3
+ ✔ Network spsolution_default Created                                                                                                                                         0.0s 
+ ✔ Container spsolution-mcp-1 Created                                                                                                                                         0.0s 
+ ✔ Container spsolution-api-1 Created                                                                                                                                         0.0s 
+sp>  connection failed: did not receive a valid HTTP response. retrying...
+ connection failed: Server disconnected without sending a response.. retrying...
+ idle
+ launch {}
+ launch {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 89}
+ waiting_user
+sp> /observe
+sp>  observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 84}
+ None (about:blank) | interactive=0 text_blocks=0 overlays=0
+ None (about:blank) | interactive=0 text_blocks=0 overlays=0
+ waiting_user
+sp> /chat
+sp(chat)>  Chat mode enabled. Tell me what to do.
+ waiting_user
+sp(chat)> какая погода в москве сейчас
+sp(chat)>  running
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 26731}
+ GISMETEO: Погода в России, прогноз погоды на сегодня, завтра, 3 дня, выходные, неделю, 10 дней, 2 недели, месяц (https://www.gismeteo.ru/) | interactive=263 text_blocks=30 
+overlays=0
+ По данным Gismeteo (по состоянию на Пн, 19 января, 9:31): в Москве сейчас −7°C, по ощущениям −9°C. Пасмурно. Ветер ~1 м/с (СЗ), порывы до 4 м/с. Давление 762 мм рт. ст., 
+влажность 88%, осадков нет.
+ По данным Gismeteo (по состоянию на Пн, 19 января, 9:31): в Москве сейчас −7°C, по ощущениям −9°C. Пасмурно. Ветер ~1 м/с (СЗ), порывы до 4 м/с. Давление 762 мм рт. ст., 
+влажность 88%, осадков нет.
+ waiting_user
+sp(chat)> сравни погоду в севастополе и в нск сейчас
+sp(chat)>  running
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 26599}
+ GISMETEO: Погода в России, прогноз погоды на сегодня, завтра, 3 дня, выходные, неделю, 10 дней, 2 недели, месяц (https://www.gismeteo.ru/) | interactive=263 text_blocks=30 
+overlays=0
+ type {'eid': 'e25', 'value': 'Севастополь', 'element': 'textbox Поиск местоположения'}
+ type {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 111}
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 30457}
+ GISMETEO: Погода в России, прогноз погоды на сегодня, завтра, 3 дня, выходные, неделю, 10 дней, 2 недели, месяц (https://www.gismeteo.ru/) | interactive=317 text_blocks=30 
+overlays=0
+ click {'eid': 'e461', 'element': 'link Севастополь Россия, Севастополь (город федерального значения)'}
+ click {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 34351}
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 34257}
+ GISMETEO: Погода в Севастополе сегодня, прогноз погоды Севастополь на сегодня, Севастополь (город федерального значения), Россия 
+(https://www.gismeteo.ru/weather-sevastopol-5003/) | interactive=390 text_blocks=30 overlays=0
+ type {'eid': 'e30', 'value': 'Новосибирск', 'element': 'textbox Поиск местоположения'}
+ type {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 111}
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 38071}
+ Steps: screenshot -> ok; observe -> ok; type e25 -> ok; screenshot -> ok; observe -> ok; click e461 -> ok; .... Failures: none. Next step: continue with the current task.
+ GISMETEO: Погода в Севастополе сегодня, прогноз погоды Севастополь на сегодня, Севастополь (город федерального значения), Россия 
+(https://www.gismeteo.ru/weather-sevastopol-5003/) | interactive=442 text_blocks=30 overlays=0
+ Steps: screenshot -> ok; observe -> ok; type e25 -> ok; screenshot -> ok; observe -> ok; click e461 -> ok; .... Failures: none. Next step: continue with the current task.
+ Continue?
+ waiting_user
+sp(chat)> да
+sp(chat)>  running
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 37940}
+ GISMETEO: Погода в Севастополе сегодня, прогноз погоды Севастополь на сегодня, Севастополь (город федерального значения), Россия 
+(https://www.gismeteo.ru/weather-sevastopol-5003/) | interactive=442 text_blocks=30 overlays=0
+ click {'eid': 'e690', 'element': 'link Новосибирск Россия, Новосибирская область, городской округ Новосибирск'}
+ click {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 36917}
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 40384}
+ GISMETEO: Погода в Новосибирске сегодня, прогноз погоды Новосибирск на сегодня, городской округ Новосибирск, Новосибирская область, Россия 
+(https://www.gismeteo.ru/weather-novosibirsk-4690/) | interactive=408 text_blocks=30 overlays=0
+ type {'eid': 'e30', 'value': 'Севастополь', 'element': 'textbox Поиск местоположения'}
+ type {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 111}
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 70717}
+ GISMETEO: Погода в Новосибирске сегодня, прогноз погоды Новосибирск на сегодня, городской округ Новосибирск, Новосибирская область, Россия 
+(https://www.gismeteo.ru/weather-novosibirsk-4690/) | interactive=546 text_blocks=30 overlays=0
+ click {'eid': 'e695', 'element': 'link Севастополь Россия, Севастополь (город федерального значения)'}
+ click {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 35080}
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 36288}
+ Steps: screenshot -> ok; observe -> ok; click e690 -> ok; screenshot -> ok; observe -> ok; type e30 -> ok; .... Failures: none. Next step: continue with the current task.
+ GISMETEO: Погода в Севастополе сегодня, прогноз погоды Севастополь на сегодня, Севастополь (город федерального значения), Россия 
+(https://www.gismeteo.ru/weather-sevastopol-5003/) | interactive=407 text_blocks=30 overlays=0
+ Steps: screenshot -> ok; observe -> ok; click e690 -> ok; screenshot -> ok; observe -> ok; type e30 -> ok; .... Failures: none. Next step: continue with the current task.
+ Continue?
+ waiting_user
+sp(chat)> да
+sp(chat)>  running
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 40074}
+ GISMETEO: Погода в Севастополе сегодня, прогноз погоды Севастополь на сегодня, Севастополь (город федерального значения), Россия 
+(https://www.gismeteo.ru/weather-sevastopol-5003/) | interactive=438 text_blocks=30 overlays=0
+ type {'eid': 'e30', 'value': 'Новосибирск', 'element': 'textbox Поиск местоположения'}
+ type {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 111}
+ screenshot {}
+ screenshot {'content_items': 2, 'content_types': {'text': 1, 'image': 1}, 'text_chars': 307}
+ observe {}
+ observe {'content_items': 1, 'content_types': {'text': 1}, 'text_chars': 43930}
+ GISMETEO: Погода в Севастополе сегодня, прогноз погоды Севастополь на сегодня, Севастополь (город федерального значения), Россия 
+(https://www.gismeteo.ru/weather-sevastopol-5003/) | interactive=492 text_blocks=30 overlays=0
+sp(chat)>                                                                                                                                                                          
+Exiting.
+
+
+chat_history не сохраняет историю страниц ( и не должен) но агент не помнит вообще ничего с предыдущей страницы 

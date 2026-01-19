@@ -13,7 +13,7 @@ from ..session import RunState, Session
 from .llm import ActionContext, LLMActionPlanner
 
 
-MAX_TOOL_STEPS = 10
+MAX_TOOL_STEPS = 20
 EDITABLE_ROLES = {"textbox", "searchbox", "combobox", "textarea", "input"}
 
 
