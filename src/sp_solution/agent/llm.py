@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -11,6 +12,146 @@ from langchain_openai import ChatOpenAI
 
 from ..config import Settings
 from ..models import Action, Observation
+
+
+_ESCAPED_UNICODE_RE = re.compile(r"(\\u[0-9a-fA-F]{4}|\\U[0-9a-fA-F]{8})")
+_WHITESPACE_RE = re.compile(r"\s+")
+_ZERO_WIDTH_CODEPOINTS = {
+    0x200B,  # ZERO WIDTH SPACE
+    0x200C,  # ZERO WIDTH NON-JOINER
+    0x200D,  # ZERO WIDTH JOINER
+    0x2060,  # WORD JOINER
+    0xFEFF,  # BOM
+    0x00AD,  # SOFT HYPHEN
+}
+_ZERO_WIDTH_TRANSLATION = {codepoint: None for codepoint in _ZERO_WIDTH_CODEPOINTS}
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"  # flags
+    "\U0001F300-\U0001F5FF"  # symbols & pictographs
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F680-\U0001F6FF"  # transport & map
+    "\U0001F700-\U0001F77F"  # alchemical symbols
+    "\U0001F780-\U0001F7FF"  # geometric shapes extended
+    "\U0001F800-\U0001F8FF"  # supplemental arrows
+    "\U0001F900-\U0001F9FF"  # supplemental symbols & pictographs
+    "\U0001FA70-\U0001FAFF"  # symbols & pictographs extended-A
+    "\U00002700-\U000027BF"  # dingbats
+    "\U00002600-\U000026FF"  # misc symbols
+    "\U00002300-\U000023FF"  # misc technical
+    "\uFE0E\uFE0F"  # variation selectors
+    "]"
+)
+
+
+def _decode_unicode_escapes(text: str) -> str:
+    if not _ESCAPED_UNICODE_RE.search(text):
+        return text
+    length = len(text)
+    i = 0
+    out: list[str] = []
+    while i < length:
+        if text[i] == "\\" and i + 1 < length and text[i + 1] in {"u", "U"}:
+            if text[i + 1] == "u" and i + 6 <= length:
+                hex_part = text[i + 2 : i + 6]
+                if re.fullmatch(r"[0-9a-fA-F]{4}", hex_part):
+                    codepoint = int(hex_part, 16)
+                    if 0xD800 <= codepoint <= 0xDBFF and i + 12 <= length:
+                        if text[i + 6 : i + 8] == "\\u":
+                            low_part = text[i + 8 : i + 12]
+                            if re.fullmatch(r"[0-9a-fA-F]{4}", low_part):
+                                low = int(low_part, 16)
+                                if 0xDC00 <= low <= 0xDFFF:
+                                    combined = 0x10000 + ((codepoint - 0xD800) << 10) + (low - 0xDC00)
+                                    out.append(chr(combined))
+                                    i += 12
+                                    continue
+                    out.append(chr(codepoint))
+                    i += 6
+                    continue
+            if text[i + 1] == "U" and i + 10 <= length:
+                hex_part = text[i + 2 : i + 10]
+                if re.fullmatch(r"[0-9a-fA-F]{8}", hex_part):
+                    codepoint = int(hex_part, 16)
+                    out.append(chr(codepoint))
+                    i += 10
+                    continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if _ESCAPED_UNICODE_RE.search(text):
+        text = _decode_unicode_escapes(text)
+    text = text.translate(_ZERO_WIDTH_TRANSLATION)
+    text = _EMOJI_RE.sub("", text)
+    text = unicodedata.normalize("NFKC", text)
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    return text or None
+
+
+def _is_punct_or_space(text: str) -> bool:
+    return not any(char.isalnum() for char in text)
+
+
+def _clean_text_blocks(values: list[Any]) -> list[str]:
+    cleaned: list[str] = []
+    last_value: str | None = None
+    for value in values:
+        text = _clean_text(value)
+        if not text:
+            continue
+        if _is_punct_or_space(text):
+            continue
+        if last_value == text:
+            continue
+        cleaned.append(text)
+        last_value = text
+    return cleaned
+
+
+def _clean_observation_for_llm(observation: Observation) -> dict[str, Any]:
+    payload = observation.model_dump()
+    page = payload.get("page") or {}
+    if isinstance(page, dict):
+        page["title"] = _clean_text(page.get("title"))
+        page["url"] = _clean_text(page.get("url"))
+        payload["page"] = page
+
+    interactive = payload.get("interactive") or []
+    if isinstance(interactive, list):
+        cleaned_interactive: list[dict[str, Any]] = []
+        for element in interactive:
+            if not isinstance(element, dict):
+                continue
+            entry = dict(element)
+            for key in ("name", "value", "placeholder", "role"):
+                entry[key] = _clean_text(entry.get(key))
+            cleaned_interactive.append(entry)
+        payload["interactive"] = cleaned_interactive
+
+    payload["text_blocks"] = _clean_text_blocks(payload.get("text_blocks") or [])
+    payload["overlays"] = _clean_text_blocks(payload.get("overlays") or [])
+
+    overlay_actions = payload.get("overlay_actions") or []
+    if isinstance(overlay_actions, list):
+        cleaned_actions: list[dict[str, Any]] = []
+        for action in overlay_actions:
+            if not isinstance(action, dict):
+                continue
+            text = _clean_text(action.get("text"))
+            if not text:
+                continue
+            entry = dict(action)
+            entry["text"] = text
+            cleaned_actions.append(entry)
+        payload["overlay_actions"] = cleaned_actions
+
+    return payload
 
 
 def _openrouter_extra_body(settings: Settings) -> Dict[str, Any] | None:
@@ -42,7 +183,10 @@ class LLMDescriber:
             "You are an assistant summarizing a browser observation for an agent. "
             "Be concise, mention page title/url, key interactive elements, and any overlays."
         )
-        message = HumanMessage(content=f"{prompt}\n\nObservation: {observation.model_dump()}")
+        cleaned = _clean_observation_for_llm(observation)
+        message = HumanMessage(
+            content=f"{prompt}\n\nObservation: {json.dumps(cleaned, ensure_ascii=False)}"
+        )
         try:
             response = await self._client.ainvoke([message])
         except Exception as exc:
@@ -96,7 +240,9 @@ class LLMActionPlanner:
         return action
 
     def _build_prompt(self, context: ActionContext) -> str:
-        observation = context.observation.model_dump() if context.observation else None
+        observation = (
+            _clean_observation_for_llm(context.observation) if context.observation else None
+        )
         return json.dumps(
             {
                 "user_message": context.user_message,
@@ -105,7 +251,7 @@ class LLMActionPlanner:
                 "recent_steps": context.recent_steps,
                 "observation": observation,
             },
-            ensure_ascii=True,
+            ensure_ascii=False,
         )
 
 
