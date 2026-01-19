@@ -26,6 +26,7 @@ class AgentRunner:
         self._policy = PolicyGate()
         self._planner = LLMActionPlanner(settings)
         self._last_observation: Observation | None = None
+        self._last_screenshot: dict[str, str] | None = None
         self._logger = logging.getLogger(__name__)
 
     async def handle_user_message(self, text: str) -> None:
@@ -202,6 +203,7 @@ class AgentRunner:
                 max_steps=MAX_TOOL_STEPS,
                 recent_steps=run_state.steps[-5:],
                 chat_history=list(self._session.chat_history),
+                screenshot=self._last_screenshot,
             )
             action = await self._planner.next_action(context)
             if action.kind == "stop":
@@ -386,12 +388,13 @@ class AgentRunner:
     ) -> Observation:
         step_state = run_state if count_step else None
         if take_screenshot:
-            await self._call_tool(
+            screenshot = await self._call_tool(
                 "screenshot",
                 {},
                 run_state=step_state,
                 action=Action(kind="screenshot"),
             )
+            self._last_screenshot = self._extract_screenshot(screenshot)
         raw = await self._call_tool("observe", {}, run_state=step_state, action=None)
         self._logger.info("Observe raw response: %s", raw)
         observation = self._observer.build(raw)
@@ -572,6 +575,33 @@ class AgentRunner:
         if not self._browser:
             self._browser = MCPBrowserClient(self._session.session_id, self._settings)
         return self._browser
+
+    @staticmethod
+    def _extract_screenshot(result: Dict[str, Any]) -> dict[str, str] | None:
+        if not isinstance(result, dict):
+            return None
+        content = result.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") != "image":
+                    continue
+                url = item.get("url")
+                if isinstance(url, str) and url:
+                    return {"url": url}
+                data = item.get("data") or item.get("base64")
+                if isinstance(data, str) and data:
+                    mime_type = item.get("mimeType") or item.get("mime_type") or "image/png"
+                    return {"data": data, "mime_type": str(mime_type)}
+        url = result.get("url")
+        if isinstance(url, str) and url:
+            return {"url": url}
+        data = result.get("data") or result.get("base64")
+        if isinstance(data, str) and data:
+            mime_type = result.get("mimeType") or result.get("mime_type") or "image/png"
+            return {"data": data, "mime_type": str(mime_type)}
+        return None
 
     def _build_limit_summary(self, run_state: RunState) -> str:
         done = "; ".join(run_state.steps[:6])

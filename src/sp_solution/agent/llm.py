@@ -154,6 +154,19 @@ def _clean_observation_for_llm(observation: Observation) -> dict[str, Any]:
     return payload
 
 
+def _screenshot_to_image_url(screenshot: dict[str, str] | None) -> str | None:
+    if not screenshot:
+        return None
+    url = screenshot.get("url")
+    if isinstance(url, str) and url:
+        return url
+    data = screenshot.get("data")
+    if isinstance(data, str) and data:
+        mime_type = screenshot.get("mime_type") or "image/png"
+        return f"data:{mime_type};base64,{data}"
+    return None
+
+
 def _openrouter_extra_body(settings: Settings) -> Dict[str, Any] | None:
     provider = settings.openrouter_provider
     if not provider:
@@ -172,6 +185,7 @@ class ActionContext:
     max_steps: int
     recent_steps: list[str]
     chat_history: list[dict[str, str]]
+    screenshot: dict[str, str] | None
 
 
 class LLMActionPlanner:
@@ -196,9 +210,17 @@ class LLMActionPlanner:
             raise RuntimeError("OpenRouter client is not configured. Set OPENROUTER_API_KEY.")
         prompt = self._build_prompt(context)
         self._logger.info("LLM prompt:\n%s", prompt)
+        image_url = _screenshot_to_image_url(context.screenshot)
+        if image_url:
+            human_content = [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ]
+        else:
+            human_content = prompt
         messages = [
             SystemMessage(content=_ACTION_SYSTEM_PROMPT),
-            HumanMessage(content=prompt),
+            HumanMessage(content=human_content),
         ]
         try:
             response = await self._client.ainvoke(messages)
@@ -214,6 +236,13 @@ class LLMActionPlanner:
         observation = (
             _clean_observation_for_llm(context.observation) if context.observation else None
         )
+        screenshot_meta = None
+        if context.screenshot:
+            screenshot_meta = {
+                "available": True,
+                "mime_type": context.screenshot.get("mime_type"),
+                "has_url": "url" in context.screenshot,
+            }
         return json.dumps(
             {
                 "user_message": context.user_message,
@@ -222,6 +251,7 @@ class LLMActionPlanner:
                 "recent_steps": context.recent_steps,
                 "observation": observation,
                 "chat_history": context.chat_history,
+                "screenshot": screenshot_meta,
             },
             ensure_ascii=False,
         )
