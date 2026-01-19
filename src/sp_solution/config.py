@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 
-
 @dataclass(frozen=True)
 class Settings:
     mcp_endpoint: str | None
@@ -19,7 +18,8 @@ class Settings:
 def load_settings() -> Settings:
     load_dotenv()
     provider = os.getenv("OPENROUTER_PROVIDER")
-    provider = provider.strip() if provider else None
+
+
 
     return Settings(
         mcp_endpoint=os.getenv("MCP_ENDPOINT"),
