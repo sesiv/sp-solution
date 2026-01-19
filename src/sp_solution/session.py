@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Literal
+from typing import Any, Dict, Optional
 
-from .models import Action, Event, ServerMessage
-
-MAX_CHAT_HISTORY = 40
-MAX_CHAT_HISTORY_CHARS = 4000
+from .models import Event, ServerMessage
 
 
 class EventBroker:
@@ -44,23 +41,13 @@ class Session:
     events: EventBroker = field(default_factory=EventBroker)
     messages: asyncio.Queue[ServerMessage] = field(default_factory=lambda: asyncio.Queue(maxsize=200))
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    pending_action_id: Optional[str] = None
-    pending_action: Optional[Action] = None
-    pending_kind: Literal["none", "confirm", "manual"] = "none"
-    mode: Literal["cmd", "chat"] = "cmd"
-    run_state: Optional[RunState] = None
     status: str = "idle"
     runner: Optional[Any] = None
-    chat_history: list[dict[str, str]] = field(default_factory=list)
 
     async def publish_event(self, event: Event) -> None:
         await self.events.publish(event)
 
     async def send_message(self, message: ServerMessage) -> None:
-        if self.mode == "chat" and message.type in {"agent_message", "agent_question"}:
-            text = message.payload.get("text")
-            if isinstance(text, str):
-                self.record_chat("assistant", text)
         try:
             self.messages.put_nowait(message)
         except asyncio.QueueFull:
@@ -72,19 +59,6 @@ class Session:
                 self.messages.put_nowait(message)
             except asyncio.QueueFull:
                 pass
-
-    def record_chat(self, role: str, content: str) -> None:
-        text = content.strip()
-        if not text:
-            return
-        self.chat_history.append({"role": role, "content": text})
-        if len(self.chat_history) > MAX_CHAT_HISTORY:
-            self.chat_history = self.chat_history[-MAX_CHAT_HISTORY:]
-        if MAX_CHAT_HISTORY_CHARS:
-            total = sum(len(item.get("content", "")) for item in self.chat_history)
-            while self.chat_history and total > MAX_CHAT_HISTORY_CHARS:
-                removed = self.chat_history.pop(0)
-                total -= len(removed.get("content", ""))
 
 
 class SessionManager:
@@ -98,13 +72,3 @@ class SessionManager:
 
     def get(self, session_id: str) -> Optional[Session]:
         return self._sessions.get(session_id)
-
-
-@dataclass
-class RunState:
-    tool_steps: int = 0
-    steps: list[str] = field(default_factory=list)
-    failures: list[str] = field(default_factory=list)
-    needs_observe: bool = True
-    last_user_message: Optional[str] = None
-    invalid_actions: int = 0

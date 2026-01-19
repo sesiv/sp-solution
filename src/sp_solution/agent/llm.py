@@ -5,10 +5,11 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 from ..config import Settings
 from ..models import Action, Observation
@@ -177,6 +178,42 @@ def _openrouter_extra_body(settings: Settings) -> Dict[str, Any] | None:
     return {"provider": {"order": providers}}
 
 
+def _messages_to_history(messages: list[BaseMessage]) -> list[dict[str, str]]:
+    history: list[dict[str, str]] = []
+    for msg in messages[-20:]:
+        content = _clean_text(msg.content) if isinstance(msg.content, str) else str(msg.content)
+        if not content:
+            continue
+        if isinstance(msg, HumanMessage):
+            role = "user"
+        elif isinstance(msg, AIMessage):
+            role = "assistant"
+        else:
+            role = "system"
+        history.append({"role": role, "content": content})
+    return history
+
+
+class PlannerAction(BaseModel):
+    action: Literal[
+        "observe",
+        "click",
+        "type",
+        "scroll",
+        "wait",
+        "screenshot",
+        "need_user",
+        "stop",
+    ]
+    eid: str | None = None
+    text: str | None = None
+    direction: Literal["up", "down"] | None = None
+    amount: int | None = Field(default=None, ge=0)
+    ms: int | None = Field(default=None, ge=0)
+    reason: str | None = None
+    final_response: str | None = None
+
+
 @dataclass
 class ActionContext:
     user_message: str | None
@@ -184,13 +221,13 @@ class ActionContext:
     steps_taken: int
     max_steps: int
     recent_steps: list[str]
-    chat_history: list[dict[str, str]]
+    messages: list[BaseMessage]
     screenshot: dict[str, str] | None
 
 
 class LLMActionPlanner:
     def __init__(self, settings: Settings) -> None:
-        self._client: Optional[ChatOpenAI] = None
+        self._client: ChatOpenAI | None = None
         if settings.openrouter_api_key:
             extra_body = _openrouter_extra_body(settings)
             self._client = ChatOpenAI(
@@ -200,13 +237,14 @@ class LLMActionPlanner:
                 temperature=0.2,
                 extra_body=extra_body,
             )
+        self._structured = self._client.with_structured_output(PlannerAction) if self._client else None
         self._logger = logging.getLogger(__name__)
 
     def available(self) -> bool:
         return self._client is not None
 
     async def next_action(self, context: ActionContext) -> Action:
-        if not self._client:
+        if not self._structured:
             raise RuntimeError("OpenRouter client is not configured. Set OPENROUTER_API_KEY.")
         prompt = self._build_prompt(context)
         self._logger.info("LLM prompt:\n%s", prompt)
@@ -223,19 +261,20 @@ class LLMActionPlanner:
             HumanMessage(content=human_content),
         ]
         try:
-            response = await self._client.ainvoke(messages)
+            response = await self._structured.ainvoke(messages)
         except Exception as exc:
             raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
-        raw = response.content.strip()
-        self._logger.info("LLM response:\n%s", raw)
-        action = _parse_action_response(raw)
+        if isinstance(response, dict):
+            parsed = PlannerAction.model_validate(response)
+        else:
+            parsed = response
+        self._logger.info("LLM structured response: %s", parsed)
+        action = _action_from_plan(parsed)
         self._logger.info("LLM action: %s", action.model_dump())
         return action
 
     def _build_prompt(self, context: ActionContext) -> str:
-        observation = (
-            _clean_observation_for_llm(context.observation) if context.observation else None
-        )
+        observation = _clean_observation_for_llm(context.observation) if context.observation else None
         screenshot_meta = None
         if context.screenshot:
             screenshot_meta = {
@@ -250,7 +289,7 @@ class LLMActionPlanner:
                 "max_steps": context.max_steps,
                 "recent_steps": context.recent_steps,
                 "observation": observation,
-                "chat_history": context.chat_history,
+                "chat_history": _messages_to_history(context.messages),
                 "screenshot": screenshot_meta,
             },
             ensure_ascii=False,
@@ -260,92 +299,43 @@ class LLMActionPlanner:
 _ACTION_SYSTEM_PROMPT = (
     "You are a browser automation agent. Select the next single action to take. "
     "Use only the provided observation (including any screenshot-derived cues) and goal. "
-    "Always ground decisions in what is visible, and pick only the minimal relevant eid. "
+    "Always ground decisions in what is visible, and pick only the minimal relevant selectors. "
     "Do not invent selectors or URLs. "
-    "Output only JSON with one action. Allowed actions:\n"
-    "- observe\n"
-    "- click (requires eid)\n"
-    "- type (requires eid and text; only use editable roles like textbox/searchbox/combobox/textarea)\n"
-    "- scroll (direction: up/down, amount integer)\n"
-    "- wait (ms integer)\n"
-    "- screenshot\n"
-    "- need_user (reason: ask human to do login/captcha/2FA/payment)\n"
-    "- stop (final_response)\n"
-    "If a human login/captcha/2FA/payment is required, choose need_user.\n"
-    "Never type into buttons/links or disabled elements.\n"
-    "JSON format examples:\n"
-    "{\"action\":\"click\",\"eid\":\"abc\"}\n"
-    "{\"action\":\"type\",\"eid\":\"abc\",\"text\":\"hello\"}\n"
-    "{\"action\":\"scroll\",\"direction\":\"down\",\"amount\":600}\n"
-    "{\"action\":\"wait\",\"ms\":1000}\n"
-    "{\"action\":\"need_user\",\"reason\":\"Please log in.\"}\n"
-    "{\"action\":\"stop\",\"final_response\":\"Done.\"}\n"
+    "Allowed actions: observe, click, type, scroll, wait, screenshot, need_user, stop. "
+    "If a human login/captcha/2FA/payment is required, choose need_user. "
+    "Never type into buttons/links or disabled elements. "
+    "When typing, provide the text in the 'text' field. "
+    "When scrolling, provide 'direction' (up/down) and 'amount'. "
+    "When waiting, provide 'ms'. "
+    "When stopping, provide 'final_response'."
 )
 
 
-def _parse_action_response(raw: str) -> Action:
-    payload = _extract_json(raw)
-    if not isinstance(payload, dict):
-        return Action(kind="stop", final_response="Failed to parse model response.")
-    kind = str(payload.get("action") or payload.get("kind") or "").strip().lower()
-    if not kind:
-        return Action(kind="stop", final_response="Model response missing action.")
+def _action_from_plan(plan: PlannerAction) -> Action:
+    kind = plan.action
     if kind == "observe":
         return Action(kind="observe")
     if kind == "click":
-        eid = _as_str(payload.get("eid"))
-        if not eid:
+        if not plan.eid:
             return Action(kind="stop", final_response="Model response missing eid for click.")
-        return Action(kind="click", eid=eid)
+        return Action(kind="click", eid=plan.eid)
     if kind == "type":
-        eid = _as_str(payload.get("eid"))
-        text = _as_str(payload.get("text") or payload.get("value") or payload.get("input"))
-        if not eid or text is None:
+        if not plan.eid or plan.text is None:
             return Action(kind="stop", final_response="Model response missing eid/text for type.")
-        return Action(kind="type", eid=eid, value=text)
+        return Action(kind="type", eid=plan.eid, value=plan.text)
     if kind == "scroll":
-        direction = _as_str(payload.get("direction") or "down") or "down"
-        amount = _as_int(payload.get("amount"), 600)
+        direction = plan.direction or "down"
+        amount = plan.amount if plan.amount is not None else 600
         return Action(kind="scroll", args={"direction": direction, "amount": amount})
     if kind == "wait":
-        timeout_ms = _as_int(payload.get("ms"), 1000)
+        timeout_ms = plan.ms if plan.ms is not None else 1000
         return Action(kind="wait", args={"timeout_ms": timeout_ms})
     if kind == "screenshot":
         return Action(kind="screenshot")
     if kind == "need_user":
-        reason = _as_str(payload.get("reason") or payload.get("message")) or "Need user assistance."
+        reason = plan.reason or "Need user assistance."
         return Action(kind="need_user", reason=reason)
     if kind == "stop":
-        final_response = _as_str(payload.get("final_response") or payload.get("response") or payload.get("text"))
-        return Action(kind="stop", final_response=final_response or "Stopping.")
+        final_response = plan.final_response or "Stopping."
+        return Action(kind="stop", final_response=final_response)
     return Action(kind="stop", final_response=f"Unknown action '{kind}'.")
-
-
-def _extract_json(raw: str) -> dict | None:
-    text = raw.strip()
-    if text.startswith("{") and text.endswith("}"):
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return None
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return None
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-
-
-def _as_str(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _as_int(value: object, default: int) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
