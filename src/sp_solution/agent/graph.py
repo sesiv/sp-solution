@@ -4,6 +4,10 @@ import logging
 from typing import Any, Optional
 
 from langgraph.types import Command
+try:
+    from langgraph.errors import GraphInterrupt
+except ImportError:  # pragma: no cover - optional fallback for older versions
+    GraphInterrupt = None
 
 from ..config import Settings
 from ..models import ServerMessage
@@ -116,6 +120,12 @@ class AgentRunner:
         try:
             result = await self._agent.ainvoke(payload)
         except Exception as exc:
+            if GraphInterrupt and isinstance(exc, GraphInterrupt):
+                interrupt_payload = self._extract_interrupt_payload(exc)
+                if interrupt_payload is not None:
+                    await self._dispatch_interrupt(interrupt_payload)
+                    await self._set_status("waiting_user")
+                    return
             await self._session.send_message(
                 ServerMessage(type="agent_message", payload={"text": f"Tool failed: {exc}"})
             )
@@ -127,10 +137,37 @@ class AgentRunner:
     async def _handle_graph_result(self, result: Any) -> None:
         if isinstance(result, dict) and "__interrupt__" in result:
             payload = result.get("__interrupt__")
-            if isinstance(payload, dict):
-                await self._handle_interrupt(payload)
+            await self._dispatch_interrupt(payload)
             return
         self._pending_interrupt = None
+
+    async def _dispatch_interrupt(self, payload: Any) -> None:
+        resolved = self._coerce_interrupt_payload(payload)
+        if resolved:
+            await self._handle_interrupt(resolved)
+
+    def _coerce_interrupt_payload(self, payload: Any) -> dict[str, Any] | None:
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, list) and payload:
+            for item in payload:
+                resolved = self._coerce_interrupt_payload(item)
+                if resolved:
+                    return resolved
+            return None
+        if payload is None:
+            return None
+        return {"kind": "manual", "text": str(payload)}
+
+    def _extract_interrupt_payload(self, exc: Exception) -> Any | None:
+        value = getattr(exc, "value", None)
+        if value is not None:
+            return value
+        if exc.args:
+            if len(exc.args) == 1:
+                return exc.args[0]
+            return exc.args
+        return None
 
     async def _handle_interrupt(self, payload: dict[str, Any]) -> None:
         kind = payload.get("kind")
