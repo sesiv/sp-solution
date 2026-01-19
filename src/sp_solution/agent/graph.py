@@ -149,6 +149,9 @@ class AgentRunner:
     def _coerce_interrupt_payload(self, payload: Any) -> dict[str, Any] | None:
         if isinstance(payload, dict):
             return payload
+        value = getattr(payload, "value", None)
+        if value is not None and value is not payload:
+            return self._coerce_interrupt_payload(value)
         if isinstance(payload, list) and payload:
             for item in payload:
                 resolved = self._coerce_interrupt_payload(item)
