@@ -1,45 +1,45 @@
 # sp-solution MVP
 
-This repo implements the Solution Architecture Contract (SAC.md) as a minimal, extensible MVP.
+Этот репозиторий реализует Solution Architecture Contract (SAC.md) как минимальный, расширяемый MVP.
 
-## What is implemented
-- FastAPI transport with WebSocket chat (`/ws/{session_id}`) and SSE events (`/events/{session_id}`).
-- Session manager with per-session message queues and event broker (drop-oldest backpressure).
-- MCP browser client supporting HTTP+SSE or WebSocket transport, init handshakes, and session reset.
-- Observation pipeline that parses MCP snapshots (YAML or text), dedupes content, caps sizes, and detects overlays.
-- Policy gate that auto-approves safe actions and asks confirmation for destructive clicks (EN/RU keywords).
-- LangGraph agent loop: plan -> observe -> act with action validation, interrupts, and step limits.
-- Optional OpenRouter LLM for planning/actions/state updates with structured output + screenshots.
-- CLI REPL (Typer + prompt_toolkit + Rich) with live SSE logs + WebSocket chat/confirm flow.
+## Что реализовано
+- FastAPI-транспорт с WebSocket-чатом (`/ws/{session_id}`) и SSE-событиями (`/events/{session_id}`).
+- Менеджер сессий с очередями сообщений и брокером событий на сессию (backpressure с выбрасыванием старых).
+- MCP-клиент браузера с поддержкой HTTP+SSE или WebSocket, handshake и восстановлением сессии.
+- Конвейер наблюдений: парсит MCP-снимки (YAML или текст), удаляет дубликаты, ограничивает размер, детектит оверлеи.
+- Политика безопасности: авторазрешение безопасных действий и запрос подтверждения на разрушительные клики (EN/RU).
+- Агентный цикл LangGraph: plan -> observe -> act с валидацией действий, interrupt-потоками и лимитом шагов.
+- Опциональный OpenRouter LLM для планов/действий/обновления состояния со structured output + скриншотами.
+- CLI REPL (Typer + prompt_toolkit + Rich) с живыми SSE-логами и WebSocket-чатом/подтверждениями.
 
-## Implementation notes
-### Agent loop
-- Chat mode uses the LLM for plan/action/state updates; command mode executes single-step tool commands.
-- Max tool steps: 100; invalid actions are blocked after 3 validation failures.
-- Action validation ensures click/type targets exist and type actions hit editable roles only.
+## Примечания по реализации
+### Агентный цикл
+- Режим чата использует LLM для plan/action/state; режим команд выполняет одиночные tool-команды.
+- Лимит инструментальных шагов: 100; после 3 ошибок валидации действия блокируются.
+- Валидация действий проверяет существование цели и допускает `type` только для редактируемых ролей.
 
-### Observation
-- Parses MCP snapshot YAML when available; falls back to heuristic parsing from text.
-- Caps interactive elements (160) and text blocks (30), trims text blocks to 200 chars, and dedupes content.
-- Detects overlay-like text (cookie/privacy/subscribe/etc) and suggests candidate dismiss/accept actions.
+### Наблюдение
+- Парсит YAML-снимок MCP при наличии; иначе использует эвристику по тексту.
+- Ограничивает интерактивные элементы (160) и текстовые блоки (30), обрезает блоки до 200 символов и дедупит.
+- Детектит оверлеи (cookie/privacy/subscribe/и т.д.) и предлагает кандидаты для dismiss/accept.
 
-### Policy & safety
-- Allowlist covers observe/launch/scroll/wait/screenshot/stop/need_user.
-- Clicks matching destructive keywords require user confirmation; other non-allowlisted actions require confirmation.
+### Политика и безопасность
+- Allowlist: observe/launch/scroll/wait/screenshot/stop/need_user.
+- Кликом с разрушительными ключевыми словами требуется подтверждение; остальные вне allowlist тоже требуют подтверждения.
 
-### Transport & events
-- WebSocket message types: `user_message`, `user_confirm`, `control`.
-- Server message types: `agent_message`, `agent_question`, `status`.
-- SSE event types: `tool_call`, `tool_result`, `observation`, `policy_request`, `policy_result`, `error`.
+### Транспорт и события
+- WebSocket типы сообщений: `user_message`, `user_confirm`, `control`.
+- Server message типы: `agent_message`, `agent_question`, `status`.
+- SSE типы событий: `tool_call`, `tool_result`, `observation`, `policy_request`, `policy_result`, `error`.
 
-### MCP integration
-- Supports HTTP+SSE and WS endpoints; `MCP_ENDPOINT` is required.
-- Tool mapping targets Playwright MCP defaults (`browser_snapshot`, `browser_click`, `browser_type`,
+### MCP интеграция
+- Поддерживаются HTTP+SSE и WS endpoints; `MCP_ENDPOINT` обязателен.
+- Маппинг инструментов на Playwright MCP defaults (`browser_snapshot`, `browser_click`, `browser_type`,
   `browser_press_key`, `browser_wait_for`, `browser_take_screenshot`, `browser_install`).
-- Scroll adapts to `press_key`/`scroll`/`wheel` tool names to keep compatibility.
+- Скролл адаптируется к `press_key`/`scroll`/`wheel` для совместимости.
 
-## Quick start
-1) Create a virtual environment and install dependencies:
+## Быстрый старт
+1) Создайте виртуальное окружение и установите зависимости:
 
 ```bash
 python -m venv .venv
@@ -47,79 +47,79 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-2) Start the server:
+2) Запустите сервер:
 
 ```bash
 sp-server
 ```
 
-3) Start the CLI (use `--auto-launch` if you want to send `/launch` on startup):
+3) Запустите CLI (используйте `--auto-launch`, если хотите отправить `/launch` при старте):
 
 ```bash
 sp-cli --server http://127.0.0.1:8000 --session demo
 ```
 
-Then run `/launch` once if your MCP server needs the browser install/bootstrap step.
+Затем один раз выполните `/launch`, если MCP-серверу нужен этап установки/инициализации браузера.
 
 ## Docker Compose
-Build and run the API + MCP server:
+Сборка и запуск API + MCP сервера:
 
 ```bash
 docker compose up --build
 ```
 
-Notes:
-- To see the headed browser on Linux, allow X11 and pass through `DISPLAY`:
-  `xhost +local:docker` before `docker compose up`.
-- MCP downloads packages on first run via `npx`, so network access is required.
-- If MCP fails to start, set `MCP_PACKAGE` or `MCP_CMD` in `.env` to override the startup command.
-- For persistent sessions in Docker, set `MCP_ARGS` to include `--user-data-dir=/data` (default in `docker-compose.yml`).
-- Chrome in Docker runs as root; `--no-sandbox` is included in the default `MCP_ARGS`.
+Примечания:
+- Чтобы увидеть headed браузер на Linux, разрешите X11 и передайте `DISPLAY`:
+  `xhost +local:docker` перед `docker compose up`.
+- MCP скачивает пакеты при первом запуске через `npx`, поэтому нужен доступ в сеть.
+- Если MCP не стартует, задайте `MCP_PACKAGE` или `MCP_CMD` в `.env` для переопределения команды.
+- Для persistent-сессий в Docker задайте `MCP_ARGS` с `--user-data-dir=/data` (по умолчанию в `docker-compose.yml`).
+- Chrome в Docker работает от root; `--no-sandbox` включен в `MCP_ARGS` по умолчанию.
 
-## Host CLI (recommended for flaky Docker TTY)
-Start the Docker services, then run the CLI on the host with the local TTY:
+## CLI на хосте (рекомендуется при нестабильном TTY в Docker)
+Поднимите сервисы Docker, затем запустите CLI на хосте с локальным TTY:
 
 ```bash
 ./scripts/repl.sh
 ```
 
-This runs `docker compose up -d` and then executes `sp-cli` via `workon sp_solution`.
-Override the defaults with `SP_SERVER` and `SP_SESSION`.
+Скрипт запускает `docker compose up -d` и затем выполняет `sp-cli` через `workon sp_solution`.
+Переопределяйте дефолты через `SP_SERVER` и `SP_SESSION`.
 
-## CLI commands
-- `/chat` to enter chat mode (natural language agent loop).
-- `/exit` to leave chat mode and return to command mode.
-- `/quit` to exit the REPL.
-- `/launch` to run the MCP browser install/bootstrap tool.
-- `/observe` to trigger a new observation cycle.
-- `/click <eid>` to click an element.
-- `/type <eid> <text>` to type into a field.
-- `/scroll [direction] [amount]` to scroll (default: down 600).
-- `/wait [ms]` to wait.
-- `/screenshot` to request a screenshot.
-- `/yes` or `/no` to confirm policy-gated actions.
+## Команды CLI
+- `/chat` — вход в режим чата (agent loop).
+- `/exit` — выход из режима чата и возврат в режим команд.
+- `/quit` — выход из REPL.
+- `/launch` — запуск инструмента установки/инициализации браузера MCP.
+- `/observe` — новый цикл наблюдения.
+- `/click <eid>` — клик по элементу.
+- `/type <eid> <text>` — ввод текста в поле.
+- `/scroll [direction] [amount]` — скролл (по умолчанию: down 600).
+- `/wait [ms]` — ожидание.
+- `/screenshot` — запрос скриншота.
+- `/yes` или `/no` — подтверждение policy-действий.
 
-Use `--auto-launch` or `SP_AUTO_LAUNCH=1` to send `/launch` automatically.
+Используйте `--auto-launch` или `SP_AUTO_LAUNCH=1` для автоматической отправки `/launch`.
 
-## MCP configuration
-The browser layer expects a Playwright MCP server endpoint. Configure it using environment variables:
+## Конфигурация MCP
+Браузерный слой ожидает endpoint MCP сервера Playwright. Настройте через переменные окружения:
 
-- `MCP_ENDPOINT`: HTTP(S) or WS(S) endpoint for the MCP server (e.g. `http://127.0.0.1:3333/mcp`).
-- Tool names are bound to Playwright MCP defaults (`browser_snapshot`, `browser_click`, `browser_type`,
+- `MCP_ENDPOINT`: HTTP(S) или WS(S) endpoint MCP (например `http://127.0.0.1:3333/mcp`).
+- Имена инструментов соответствуют Playwright MCP defaults (`browser_snapshot`, `browser_click`, `browser_type`,
   `browser_press_key`, `browser_wait_for`, `browser_take_screenshot`, `browser_install`).
-- `MCP_USER_DATA_DIR`: persistent profile directory for browser sessions (used by the MCP server).
+- `MCP_USER_DATA_DIR`: каталог профиля браузера для persistent-сессий (используется MCP сервером).
 
-If `MCP_ENDPOINT` is not set, the browser layer will return a clear runtime error.
+Если `MCP_ENDPOINT` не задан, браузерный слой вернет явную runtime-ошибку.
 
-## OpenRouter (optional)
-Set:
+## OpenRouter (опционально)
+Задайте:
 - `OPENROUTER_API_KEY`
-- `OPENROUTER_MODEL` (e.g. `openai/gpt-4o-mini`)
-- `OPENROUTER_PROVIDER` (optional comma-separated provider order)
+- `OPENROUTER_MODEL` (например `openai/gpt-4o-mini`)
+- `OPENROUTER_PROVIDER` (опционально, порядок провайдеров через запятую)
 
-Chat mode calls the LLM only if configured; command mode does not require it.
+Режим чата вызывает LLM только при наличии конфигурации; режим команд LLM не требует.
 
 ## Notes
-- The observation layer limits token usage and never forwards full page snapshots.
-- The policy gate requires confirmation for non-whitelisted actions.
-- The agent enforces a 100-step tool limit and stops after repeated invalid actions.
+- Наблюдение ограничивает объем данных и никогда не пересылает полный снимок страницы.
+- Политика безопасности требует подтверждения для действий вне allowlist.
+- Агент имеет лимит 100 инструментальных шагов и останавливается после повторных ошибок валидации.
