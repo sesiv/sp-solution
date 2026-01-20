@@ -9,7 +9,7 @@ from typing import Any, Dict, Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..config import Settings
 from ..models import Action, Observation
@@ -227,10 +227,20 @@ class PlannerAction(BaseModel):
     final_response: str | None = None
 
 
+class FactItem(BaseModel):
+    fact: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return {"fact": value}
+        return value
+
+
 class PlanOutput(BaseModel):
     plan: list[str] = Field(min_length=1, max_length=6)
-    facts: list[str] | None = None
-    missing: list[str] | None = None
+    facts: list[FactItem] | None = None
 
 
 class ProgressState(BaseModel):
@@ -242,8 +252,7 @@ class ProgressState(BaseModel):
 
 class WorkingStateUpdate(BaseModel):
     progress: ProgressState | None = None
-    facts: list[str] | None = None
-    missing: list[str] | None = None
+    facts: list[FactItem] | None = None
     needs_replan: bool | None = None
 
 
@@ -253,8 +262,7 @@ class ActionContext:
     current_goal: str | None
     plan: list[str]
     progress: dict[str, Any] | None
-    facts: list[str]
-    missing: list[str]
+    facts: list[dict[str, str]]
     observation: Observation | None
     steps_taken: int
     max_steps: int
@@ -266,8 +274,7 @@ class ActionContext:
 @dataclass
 class PlanContext:
     current_goal: str
-    facts: list[str]
-    missing: list[str]
+    facts: list[dict[str, str]]
     messages: list[BaseMessage]
 
 
@@ -276,8 +283,7 @@ class StateUpdateContext:
     current_goal: str | None
     plan: list[str]
     progress: dict[str, Any] | None
-    facts: list[str]
-    missing: list[str]
+    facts: list[dict[str, str]]
     last_action: dict[str, Any] | None
     last_tool_result: dict[str, Any] | None
     observation: Observation | None
@@ -339,7 +345,6 @@ class LLMActionPlanner:
                 "plan": context.plan,
                 "progress": context.progress,
                 "facts": context.facts,
-                "missing": context.missing,
                 "steps_taken": context.steps_taken,
                 "max_steps": context.max_steps,
                 "recent_steps": context.recent_steps,
@@ -367,7 +372,6 @@ class LLMPlanBuilder:
             {
                 "current_goal": context.current_goal,
                 "facts": context.facts,
-                "missing": context.missing,
                 "chat_history": _messages_to_history(context.messages),
             },
             ensure_ascii=False,
@@ -406,7 +410,6 @@ class LLMStateUpdater:
             "plan": context.plan,
             "progress": context.progress,
             "facts": context.facts,
-            "missing": context.missing,
             "last_action": context.last_action,
             "last_tool_result": context.last_tool_result,
             "observation": observation,
@@ -454,10 +457,17 @@ _PLAN_SYSTEM_PROMPT = (
 
 _STATE_UPDATE_PROMPT = (
     "You update the agent working state after one action. "
-    "Use the current goal, plan, progress, facts, missing, last action/result, and observation. "
+    "Follow the framework: "
+    "1) keep a plan of 3-6 steps, "
+    "2) execute the plan step by step, "
+    "3) while executing you may advance the current step, analyze the gathered info, store facts, or revise the plan, "
+    "4) the final plan step must always be answering the user. "
+    "Use the current goal, plan, progress, facts, last action/result, and observation. "
     "Update progress (current_index, done, blocked, note) conservatively. "
-    "Update facts and missing with short generalized statements. "
-    "Never include raw page text, DOM, or element ids in facts/missing/progress. "
+    "Store facts as dense summaries of information observed on pages (concise, factual, and page-derived). "
+    "Facts must be a list of dicts with key 'fact' and a short value. "
+    "DO NOT STORE INTERNAL REASONING, ACTION LOGS, OR PROCESS NOTES IN FACTS. "
+    "Never include raw page text, DOM, or element ids in facts/progress. "
     "Set needs_replan true if the current plan is no longer valid."
 )
 

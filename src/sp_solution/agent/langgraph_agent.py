@@ -21,7 +21,7 @@ from ..policy import PolicyGate
 from .llm import ActionContext, LLMActionPlanner, LLMPlanBuilder, LLMStateUpdater, PlanContext, StateUpdateContext
 
 
-MAX_TOOL_STEPS = 10
+MAX_TOOL_STEPS = 30
 EDITABLE_ROLES = {"textbox", "searchbox", "combobox", "textarea", "input"}
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,7 @@ class AgentState(TypedDict, total=False):
     current_goal: Optional[str]
     plan: List[str]
     progress: Dict[str, Any] | None
-    facts: List[str]
-    missing: List[str]
+    facts: List[Dict[str, str]]
     needs_plan: bool
     last_user_message: Optional[str]
     last_observation: Optional[Observation]
@@ -165,7 +164,6 @@ class LangGraphAgent:
             "plan": list(state.get("plan") or []),
             "progress": state.get("progress"),
             "facts": list(state.get("facts") or []),
-            "missing": list(state.get("missing") or []),
             "needs_plan": bool(needs_plan),
             "last_user_message": state.get("last_user_message"),
             "last_observation": state.get("last_observation"),
@@ -219,7 +217,6 @@ class LangGraphAgent:
                         merged["plan"] = []
                         merged["progress"] = None
                         merged["facts"] = []
-                        merged["missing"] = []
         merged["user_message"] = None
         return merged
 
@@ -254,7 +251,6 @@ class LangGraphAgent:
         context = PlanContext(
             current_goal=goal,
             facts=list(merged.get("facts") or []),
-            missing=list(merged.get("missing") or []),
             messages=list(merged.get("messages") or []),
         )
         try:
@@ -266,8 +262,7 @@ class LangGraphAgent:
         merged["plan"] = plan
         merged["progress"] = self._default_progress()
         merged["needs_plan"] = False
-        merged["facts"] = self._merge_items(merged.get("facts"), output.facts)
-        merged["missing"] = self._merge_items(merged.get("missing"), output.missing)
+        merged["facts"] = self._merge_fact_items(merged.get("facts"), output.facts)
         return merged
 
     async def plan_action(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -284,7 +279,6 @@ class LangGraphAgent:
             plan=list(merged.get("plan") or []),
             progress=merged.get("progress"),
             facts=list(merged.get("facts") or []),
-            missing=list(merged.get("missing") or []),
             observation=merged.get("last_observation"),
             steps_taken=merged.get("tool_steps", 0),
             max_steps=MAX_TOOL_STEPS,
@@ -678,16 +672,37 @@ class LangGraphAgent:
             text = text[:200].rstrip()
         return text
 
-    def _merge_items(self, base: Any, updates: Any) -> List[str]:
-        result: List[str] = []
+    def _sanitize_fact_entry(self, value: Any) -> Dict[str, str] | None:
+        if hasattr(value, "model_dump"):
+            value = value.model_dump()
+        if isinstance(value, dict):
+            raw = value.get("fact")
+        else:
+            raw = value
+        text = self._sanitize_text(raw)
+        if not text:
+            return None
+        return {"fact": text}
+
+    def _merge_fact_items(self, base: Any, updates: Any) -> List[Dict[str, str]]:
+        result: List[Dict[str, str]] = []
+        seen: set[str] = set()
         for item in base or []:
-            cleaned = self._sanitize_text(item)
-            if cleaned and cleaned not in result:
-                result.append(cleaned)
+            cleaned = self._sanitize_fact_entry(item)
+            if not cleaned:
+                continue
+            if cleaned["fact"] in seen:
+                continue
+            result.append(cleaned)
+            seen.add(cleaned["fact"])
         for item in updates or []:
-            cleaned = self._sanitize_text(item)
-            if cleaned and cleaned not in result:
-                result.append(cleaned)
+            cleaned = self._sanitize_fact_entry(item)
+            if not cleaned:
+                continue
+            if cleaned["fact"] in seen:
+                continue
+            result.append(cleaned)
+            seen.add(cleaned["fact"])
         return result[:20]
 
     def _sanitize_progress(self, progress: Dict[str, Any]) -> Dict[str, Any]:
@@ -728,7 +743,6 @@ class LangGraphAgent:
             plan=list(state.get("plan") or []),
             progress=state.get("progress"),
             facts=list(state.get("facts") or []),
-            missing=list(state.get("missing") or []),
             last_action=redacted_action,
             last_tool_result=tool_summary,
             observation=state.get("last_observation"),
@@ -753,8 +767,7 @@ class LangGraphAgent:
             state["progress"] = self._sanitize_progress(progress)
         elif not state.get("progress"):
             state["progress"] = self._default_progress()
-        state["facts"] = self._merge_items(state.get("facts"), update.facts)
-        state["missing"] = self._merge_items(state.get("missing"), update.missing)
+        state["facts"] = self._merge_fact_items(state.get("facts"), update.facts)
         if update.needs_replan:
             state["needs_plan"] = True
 
@@ -886,7 +899,6 @@ class LangGraphAgent:
         steps = state.get("steps") or []
         failures = state.get("failures") or []
         progress = state.get("progress") or {}
-        missing = state.get("missing") or []
         done = "; ".join(steps[:6])
         if len(steps) > 6:
             done = f"{done}; ..."
@@ -906,15 +918,10 @@ class LangGraphAgent:
             progress_line = f"Progress step: {current_index + 1}."
         if progress_note:
             progress_line = f"{progress_line} {progress_note}".strip()
-        if missing:
-            missing_line = f"Missing: {', '.join(missing[:4])}."
-        else:
-            missing_line = "Missing: none."
         next_step = "Next step: continue with the current task."
         parts = [f"Steps: {done}.", failure_line]
         if progress_line:
             parts.append(progress_line)
-        parts.append(missing_line)
         parts.append(next_step)
         return " ".join(part for part in parts if part)
 
