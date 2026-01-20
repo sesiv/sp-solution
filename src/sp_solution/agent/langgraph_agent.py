@@ -21,7 +21,7 @@ from ..policy import PolicyGate
 from .llm import ActionContext, LLMActionPlanner, LLMPlanBuilder, LLMStateUpdater, PlanContext, StateUpdateContext
 
 
-MAX_TOOL_STEPS = 30
+MAX_TOOL_STEPS = 100
 EDITABLE_ROLES = {"textbox", "searchbox", "combobox", "textarea", "input"}
 
 logger = logging.getLogger(__name__)
