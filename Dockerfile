@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY pyproject.toml README.md SAC.md /app/
+COPY pyproject.toml README.md /app/
 RUN python - <<'PY'
 import pathlib
 import tomllib
